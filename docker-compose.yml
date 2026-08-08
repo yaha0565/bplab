@@ -1,0 +1,77 @@
+# BPLab Trace LIMS — Docker Compose (Production)
+#
+# 部署:
+#   1. 复制 .env.example → .env 并修改密钥/密码
+#   2. docker compose up -d --build
+#   3. 访问 http://localhost
+
+version: "3.9"
+
+services:
+  # ── PostgreSQL ──
+  db:
+    image: postgres:16-alpine
+    container_name: bplab-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bplab123}
+      POSTGRES_DB: ${DB_NAME:-bplab}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations/001_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-bplab}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ──
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bplab-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-bplab123}
+      DB_NAME: ${DB_NAME:-bplab}
+      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-random-secret-key}
+      CORS_ORIGINS: '["http://localhost"]'
+      DEBUG: "false"
+    volumes:
+      - uploads:/app/data/uploads
+      - attachments:/app/data/attachments
+      - signatures:/app/data/signatures
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # ── Vue Frontend (Nginx) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: bplab-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:
+    driver: local
+  uploads:
+    driver: local
+  attachments:
+    driver: local
+  signatures:
+    driver: local
