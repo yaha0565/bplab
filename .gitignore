@@ -56,3 +56,15 @@ logs/
 htmlcov/
 .tox/
 bp-lims-main (1).zip
+
+# Frontend build output
+frontend/dist/
+frontend/node_modules/
+
+# Backend
+backend/__pycache__/
+backend/app/__pycache__/
+backend/app/*/__pycache__/
+backend/app/*/*/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/

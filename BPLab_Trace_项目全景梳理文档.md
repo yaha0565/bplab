@@ -1,9 +1,9 @@
-# BPLab Trace V9.3 — 项目全景梳理文档
+# BPLab Trace V11.0 — 项目全景梳理文档
 
-> **项目状态**：🟢 生产就绪（安全加固已完成，100 项测试全部通过）
-> **生成日期**：2026-08-07
-> **数据来源**：完整代码库分析（23个.py模块 + 33个数据库表 + 25个DOCX模板）+ README
-> **当前分支**：master @ yaha0565/bplab（3 commits）
+> **项目状态**：🟢 生产就绪（Vue3+FastAPI重写完成，167项测试全部通过）
+> **生成日期**：2026-08-09
+> **数据来源**：完整代码库分析（23个后端API模块 + 33个数据库表 + 30个DOCX模板 + 25个前端页面）
+> **当前分支**：master @ bp-lims（5 commits）
 
 ---
 
@@ -14,6 +14,7 @@
 | v1.0 | 2026-08-07 | AI 初稿 | 全项目代码库分析后自动生成 |
 | v1.1 | 2026-08-07 | AI 补充 | 融合结构化模板，补充功能模块清单、术语表、变更记录体系 |
 | v1.2 | 2026-08-07 | AI 更新 | 安全加固 V10.0：登录锁定、密码策略、会话安全、数据库管理、100项测试 |
+| v2.0 | 2026-08-09 | AI 更新 | V11.0 全功能对齐：Vue3+FastAPI重写完成、实验配置CRUD、模板上传/删除、用户删除、电子签名、系统初始化、修改中心、167项测试 |
 
 ---
 
@@ -38,18 +39,18 @@
 
 | 项目属性 | 内容 |
 |----------|------|
-| 项目名称 | BPLab Trace V9.3 — 标普实验室样品全过程追溯系统 |
+| 项目名称 | BPLab Trace V11.0 — 标普实验室样品全过程追溯系统 |
 | 项目类型 | 实验室信息管理系统（LIMS） |
 | 业务领域 | 增材制造医疗器械 / 牙科材料 检验检测 |
 | 所属机构 | **大连标普检测有限公司**（DALIAN BIAOPU TESTING CO., LTD.） |
-| 技术栈 | Python 3.14 + Streamlit + SQLite（WAL模式）+ LibreOffice |
-| 部署方式 | 阿里云 ECS（Docker + Caddy HTTPS）/ 本地 Windows 工作站 |
-| 当前版本 | BPLab Trace V9.3 移动摄像头与高保真预览版 |
-| 项目阶段 | 开发/内部测试阶段，核心功能已完成 |
-| 代码规模 | 核心代码约 7,800 行（23 个 .py 源文件）+ 3 个测试文件（1,400+行） |
-| 模板资产 | 26 个受控 DOCX 模板（6 表单 + 10 实验记录 SOP + 10 实验原始记录） |
-| Git 仓库 | https://github.com/yaha0565/bplab（3 commits on master） |
-| 测试覆盖 | 100 项测试（安全 29 + 数据库 20 + 功能 51），全部通过 |
+| 技术栈 | Python 3.14 + FastAPI + Vue 3 (Vite) + Element Plus + PostgreSQL (asyncpg) |
+| 部署方式 | 前后端分离：uvicorn 后端 + nginx/vite 前端 / Docker |
+| 当前版本 | BPLab Trace V11.0 全功能对齐版 |
+| 项目阶段 | 生产就绪，167项测试全部通过 |
+| 代码规模 | 后端21个API模块 + 前端25个Vue页面 + 8个测试文件 |
+| 模板资产 | 30 个受控 DOCX 模板（6 表单 + 10 实验记录 SOP + 10 实验原始记录 + 4 其他） |
+| Git 仓库 | https://github.com/Carcharhinus7188/bp-lims（5 commits on master） |
+| 测试覆盖 | 167 项测试（安全 14 + 边界 53 + 业务流程 32 + 编码规则 27 + 委托 7 + 任务 8 + 记录报告 11 + 端到端 15），全部通过 |
 
 ### 1.2 项目背景与目标
 
@@ -270,80 +271,6 @@ stateDiagram-v2
 
 ## 三、系统流程梳理
 
-### 3.1 系统架构
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        客户端 (浏览器/WebView)                     │
-│              安卓平板/iPad — 移动摄像头组件                        │
-└─────────────────────────────┬────────────────────────────────────┘
-                              │ HTTP/HTTPS
-┌─────────────────────────────▼────────────────────────────────────┐
-│                    Streamlit 应用服务 (app.py)                     │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  UI 层: app.py (2,518行) + business_record_ui.py (599行)   │ │
-│  │  30+ 页面路由 | 5种角色导航 | 响应式 CSS (3断点)           │ │
-│  ├─────────────────────────────────────────────────────────────┤ │
-│  │  业务逻辑层:                                               │ │
-│  │  business_record_engine.py (740行) — 业务记录状态机        │ │
-│  │  experiment_engine.py (219行) — 实验数据计算引擎           │ │
-│  │  experiment_schemas.py (565行) — 10种实验Schema定义        │ │
-│  │  report_rules.py (42行) — 判定规则与结论生成               │ │
-│  ├─────────────────────────────────────────────────────────────┤ │
-│  │  文档引擎层:                                               │ │
-│  │  form_engine.py (796行) — 委托/报告/表单DOCX生成          │ │
-│  │  record_word_engine.py (145行) — 原始记录DOCX导出          │ │
-│  │  controlled_template_mappings.py (603行) — 模板字段映射    │ │
-│  │  template_record_engine.py (536行) — DOCX模板解析引擎      │ │
-│  │  docx_preview.py (173行) — LibreOffice DOCX→PDF→PNG预览   │ │
-│  │  trace_excel_engine.py (264行) — 内部追溯Excel工作簿       │ │
-│  ├─────────────────────────────────────────────────────────────┤ │
-│  │  基础设施层:                                               │ │
-│  │  lims_db.py (3,380行) — SQLite数据库 (100+ 函数)          │ │
-│  │  config.py (119行) — 配置管理 (Secrets>Env>默认值)        │ │
-│  │  constants.py (310行) — 常量/角色/菜单/拍照节点            │ │
-│  │  equipment_registry.py (1,223行) — 设备目录(88项)+绑定    │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────┬────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼────────────────────────────────────┐
-│                     数据与文件存储                                 │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐              │
-│  │ SQLite 数据库 │ │ DOCX 模板    │ │ 照片/附件    │              │
-│  │ WAL模式      │ │ 26个受控模板 │ │ + 签名图片   │              │
-│  │ 64MB缓存     │ │ templates/   │ │ data/        │              │
-│  │ 26张表       │ │              │ │              │              │
-│  └──────────────┘ └──────────────┘ └──────────────┘              │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### 3.2 模块依赖关系图
-
-```
-config.py ──► constants.py ──► lims_db.py (基础设施)
-    │              │                │
-    │              ▼                ▼
-    │         experiment_schemas.py  form_engine.py
-    │              │                │
-    │              ▼                ▼
-    │         experiment_engine.py  report_rules.py
-    │              │                │
-    ▼              ▼                ▼
-logging_config.py ──► app.py (入口，调用所有模块)
-                        │
-    ┌───────────────────┼───────────────────────┐
-    │                   │                       │
-    ▼                   ▼                       ▼
-template_record    business_record        controlled_template
-_engine.py         _engine.py             _mappings.py
-    │                   │
-    ▼                   ▼
-record_word        business_record
-_engine.py         _ui.py
-
-辅助模块: camera_evidence.py | docx_preview.py | pdf_preview.py
-          trace_excel_engine.py | quick_demo.py | equipment_registry.py
-```
 
 ### 3.3 实验记录提交流程（时序图）
 
@@ -410,18 +337,6 @@ sequenceDiagram
         UI->>U: HTML 格式预览（表格/签名/段落完整保留）
     end
 ```
-
-### 3.5 核心接口/功能调用链
-
-| 功能 | 调用链 |
-|------|--------|
-| 创建委托 | `app.py` → `create_commission()` → `audit()` → 返回 commission_no |
-| 任务包分配 | `app.py` → `create_task_package()` → `create_notification()` → 返回 package_no |
-| 实验记录保存 | `app.py` → `save_record()` → `audit()` → `freeze_document_version()` → `_refresh_package_and_report()` |
-| 复核记录 | `app.py` → `review_record()` → `audit()` → `obsolete_prior_versions()` / `create_revision()` |
-| 报告生成 | `app.py` → `ensure_report_for_task()` → `report_document()` → `overall_conclusion()` |
-| 报告签发 | `app.py` → `approver_review_report()` → `audit()` → `_refresh_package_and_report()` |
-| 异议调查 | `app.py` → `build_internal_trace_workbook()` + `modification_logs()` → `quality_submit_objection()` |
 
 ### 3.6 拍照流程
 
@@ -970,7 +885,9 @@ stateDiagram-v2
 | 电子签名 | 5角色签名图片管理 | ✅ |
 | 用户与权限 | 用户账号管理 | ✅ |
 | 审计追踪 | 哈希链式审计日志查看 | ✅ |
-| 系统初始化 | 备份 → 二次确认 → 清空业务历史 | ✅ |
+| 修改中心 | 全量数据修改记录（谁/何时/改了什么/旧值/新值） | ✅ |
+| 电子签名 | 5角色签名图片上传/预览/删除 | ✅ |
+| 系统初始化 | 健康仪表盘 → 二次确认 → 清空业务历史 | ✅ |
 
 ### 8.2 样品管理员模块（12项菜单）
 
@@ -1108,19 +1025,19 @@ stateDiagram-v2
 
 ### 10.2 相关文档
 
-| 文档名称 | 说明 | 状态 |
-|----------|------|:----:|
-| `README.md` | 项目说明（部署+演示账号+功能特性） | ✅ |
-| `UPDATE_NOTES_V6.md` | V6.0 更新说明 | ✅ |
-| `docs/受控母版状态.md` | 10种受控SOP和记录状态清单 | ✅ |
-| `docs/部署说明.md` | Streamlit Community Cloud 部署指南 | ✅ |
-| `CHANGELOG.md` | 项目变更记录 | ✅ (本次创建) |
-| 需求规格说明书 | 原始需求文档 | ⬜ |
-| 数据库设计文档 | 表结构详细说明 | ⬜ |
-| API 接口文档 | API 接口定义 | ⬜ |
-| 测试用例 | 功能测试覆盖清单 | ⬜ |
-| 用户操作手册 | 五角色操作指南 | ⬜ |
-| 运维手册 | 日常运维、备份、故障处理指南 | ⬜ |
+| 文档名称 | 说明 |   状态   |
+|----------|------|:------:|
+| `README.md` | 项目说明（部署+演示账号+功能特性） |        |
+| `UPDATE_NOTES_V6.md` | V6.0 更新说明 |        |
+| `docs/受控母版状态.md` | 10种受控SOP和记录状态清单 |        |
+| `docs/部署说明.md` | Streamlit Community Cloud 部署指南 |        |
+| `CHANGELOG.md` | 项目变更记录 | (本次创建) |
+| 需求规格说明书 | 原始需求文档 |   ⬜    |
+| 数据库设计文档 | 表结构详细说明 |   ⬜    |
+| API 接口文档 | API 接口定义 |   ⬜    |
+| 测试用例 | 功能测试覆盖清单 |   ⬜    |
+| 用户操作手册 | 五角色操作指南 |   ⬜    |
+| 运维手册 | 日常运维、备份、故障处理指南 |   ⬜    |
 
 ---
 

@@ -1,4 +1,0 @@
-fonts-noto-cjk
-libreoffice-core
-libreoffice-writer
-poppler-utils
