@@ -1,0 +1,43 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --lab-blue: #2563EB;
+  --lab-blue-light: #60A5FA;
+  --lab-navy: #1E3A5F;
+  --lab-ink: #0F172A;
+  --lab-muted: #64748B;
+  --lab-line: #E2E8F0;
+  --lab-bg: #F8FAFC;
+  --lab-panel: #FFFFFF;
+  --lab-soft: #F1F5F9;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: var(--lab-ink);
+  background: var(--lab-bg);
+}
+
+/* Element Plus 细微调整 */
+.el-menu {
+  border-right: none !important;
+}
+
+.el-card {
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06) !important;
+  border: 1px solid var(--lab-line) !important;
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--lab-blue);
+  --el-button-border-color: var(--lab-blue);
+  --el-button-hover-bg-color: var(--lab-blue-light);
+  --el-button-hover-border-color: var(--lab-blue-light);
+}
