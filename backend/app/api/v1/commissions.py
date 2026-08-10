@@ -1,6 +1,7 @@
 """委托单 API"""
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from datetime import date
@@ -202,6 +203,7 @@ async def create_commission(
 # ── 样品组创建 ──
 
 class SampleGroupCreate(BaseModel):
+    catalog_id: int | None = None
     material_name: str
     sample_count: int = Field(ge=1, le=200)
     experiment_codes: list[str] = Field(default_factory=list)
@@ -235,6 +237,23 @@ async def create_sample_group(
     if not comm_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="委托单不存在")
 
+    # 如果提供了 catalog_id，从样品资料库中获取预设信息
+    catalog_model = "标准"
+    catalog_material = body.material_name
+    if body.catalog_id:
+        cat_result = await db.execute(
+            text("SELECT sample_name, model, material_name, experiment_codes FROM sample_catalog WHERE id=:i AND enabled=TRUE"),
+            {"i": body.catalog_id},
+        )
+        cat_row = cat_result.fetchone()
+        if cat_row:
+            catalog_material = cat_row[2] or body.material_name
+            catalog_model = cat_row[1] or "标准"
+            # 如果前端未指定检测项目，则使用资料库中的预设
+            if not body.experiment_codes and cat_row[3]:
+                preset_codes = json.loads(cat_row[3]) if isinstance(cat_row[3], str) else cat_row[3]
+                body.experiment_codes = preset_codes
+
     # 生成样品组编号: BP + YYYYMMDD + 3位序号
     today_str = str(comm_row[1]) if comm_row[1] else "2026-01-01"
     date_part = today_str.replace("-", "") if "-" in today_str else today_str
@@ -250,17 +269,17 @@ async def create_sample_group(
     # 生成样品编号
     sample_nos = [f"{group_no}-S{i+1:02d}" for i in range(body.sample_count)]
 
-    # 插入样品组（只使用表中实际存在的列）
+    # 插入样品组（使用资料库信息或前端传入值）
     await db.execute(
         text("""
-            INSERT INTO sample_groups (group_no, commission_no, sample_name, material_name,
-              quantity, model, status, notes, updated_at)
-            VALUES (:gn, :cn, :sn, :mn, :qty, :md, '已入库', :nt, now())
+            INSERT INTO sample_groups (group_no, commission_no, catalog_id, sample_name, material_name,
+              model, quantity, status, notes, updated_at)
+            VALUES (:gn, :cn, :cid, :sn, :mn, :md, :qty, '已入库', :nt, now())
         """),
         {
-            "gn": group_no, "cn": commission_no, "sn": body.material_name,
-            "mn": body.material_name, "qty": body.sample_count, "md": "标准",
-            "nt": body.notes,
+            "gn": group_no, "cn": commission_no, "cid": body.catalog_id,
+            "sn": catalog_material, "mn": catalog_material, "md": catalog_model,
+            "qty": body.sample_count, "nt": body.notes,
         },
     )
 
@@ -271,7 +290,7 @@ async def create_sample_group(
     )
     group_id = gid_result.fetchone()[0]
 
-    # 插入样品（只使用表中实际存在的列）
+    # 插入样品（使用资料库信息）
     for sno in sample_nos:
         await db.execute(
             text("""
@@ -281,7 +300,7 @@ async def create_sample_group(
             """),
             {
                 "sn": sno, "gid": group_id, "gn": group_no, "cn": commission_no,
-                "snm": body.material_name, "mn": body.material_name,
+                "snm": catalog_material, "mn": catalog_material,
             },
         )
 

@@ -10,6 +10,7 @@ const formRef = ref(null)
 const loading = ref(false)
 const organizations = ref([])
 const methods = ref([])
+const catalog = ref([])
 
 const form = reactive({
   client_org_id: null,
@@ -22,6 +23,7 @@ const form = reactive({
 
 // 样品组列表
 const sampleGroups = ref([{
+  catalog_id: null,
   material_name: '',
   sample_count: 1,
   experiment_codes: [],
@@ -32,22 +34,49 @@ const sampleGroups = ref([{
 const relations = ['客户提供', '自产', '外协', '合同制造']
 
 onMounted(async () => {
-  const [orgs, mtds] = await Promise.all([
+  const [orgs, mtds, cat] = await Promise.all([
     request.get('/organizations', { params: { limit: 500 } }),
     request.get('/methods'),
+    request.get('/catalog', { params: { limit: 500 } }),
   ])
   organizations.value = orgs.data
   methods.value = mtds.data
+  catalog.value = cat.data
 })
 
 function addSampleGroup() {
   sampleGroups.value.push({
+    catalog_id: null,
     material_name: '',
     sample_count: 1,
     experiment_codes: [],
     batch_no: '',
     heat_no: '',
   })
+}
+
+function onCatalogSelect(idx, val) {
+  const sg = sampleGroups.value[idx]
+  // 数字 = 从资料库选择；字符串 = 用户自行输入的新材料
+  if (typeof val === 'number') {
+    const item = catalog.value.find(c => c.id === val)
+    if (item) {
+      sg.catalog_id = item.id
+      sg.material_name = item.material_name
+      // 自动填充资料库中预设的检测项目
+      if (item.experiment_codes && item.experiment_codes.length > 0) {
+        sg.experiment_codes = [...item.experiment_codes]
+      }
+    }
+  } else if (typeof val === 'string' && val.trim()) {
+    // 用户自行输入的材料名称
+    sg.catalog_id = null
+    sg.material_name = val.trim()
+  } else {
+    // 清空
+    sg.catalog_id = null
+    sg.material_name = ''
+  }
 }
 
 function removeSampleGroup(index) {
@@ -84,6 +113,7 @@ async function handleSubmit() {
           .map(code => methods.value.find(m => m.experiment_code === code)?.experiment_name || code)
 
         await request.post(`/commissions/${commissionNo}/sample-groups`, {
+          catalog_id: g.catalog_id || null,
           material_name: g.material_name,
           sample_count: g.sample_count,
           experiment_codes: g.experiment_codes,
@@ -187,7 +217,22 @@ async function handleSubmit() {
           <el-row :gutter="16">
             <el-col :span="14">
               <el-form-item label="材料名称">
-                <el-input v-model="sg.material_name" placeholder="如 TC4钛合金、316L不锈钢" />
+                <el-select
+                  v-model="sg.catalog_id"
+                  filterable
+                  allow-create
+                  clearable
+                  placeholder="选择或输入材料名称"
+                  style="width:100%"
+                  @change="(val) => onCatalogSelect(idx, val)"
+                >
+                  <el-option
+                    v-for="c in catalog"
+                    :key="c.id"
+                    :label="`${c.material_name}  ${c.model}  ${c.sample_name}`"
+                    :value="c.id"
+                  />
+                </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="4">
