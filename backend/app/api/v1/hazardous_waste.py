@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.services.audit_service import log_operation
 from app.core.encoding_rules import china_now
 
 router = APIRouter(prefix="/hazardous-waste", tags=["危废处理"])
@@ -110,8 +111,8 @@ async def create_waste(
                 quantity, unit, hazard_category, disposal_method, container_no, handler,
                 occurred_at, status, note, created_by, created_at, updated_at
             ) VALUES (
-                :dn, :cno, :tn, :tns::jsonb, :wt, :wn, :q, :u, :hc, :dm, :cn, :h,
-                :oa, '已登记', :note, :a, now(), now()
+                :dn, :cno, :tn, CAST(:tns AS jsonb), :wt, :wn, :q, :u, :hc, :dm, :cn, :h,
+                :oa, '已登记', :note, :a, localtimestamp, localtimestamp
             )"""),
         {"dn": disposal_no, "cno": task_data.get("commission_no"), "tn": task_data.get("task_no"),
          "tns": json.dumps(task_nos, ensure_ascii=False), "wt": body.waste_type,
@@ -120,5 +121,10 @@ async def create_waste(
          "cn": body.container_no, "h": actor,
          "oa": body.occurred_at or china_now().isoformat(), "note": body.note, "a": actor},
     )
+
+    # 审计日志
+    await log_operation(db, "hazardous_waste", disposal_no, user, "登记危废",
+                         commission_no=task_data.get("commission_no"),
+                         comment=f"类型:{body.waste_type} 数量:{body.quantity}{body.unit}")
 
     return {"disposal_no": disposal_no, "status": "已登记"}

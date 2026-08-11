@@ -31,7 +31,9 @@ const statCards = computed(() => {
       { icon: Box, color: '#2563EB', bg: '#DBEAFE', value: counts.value.my_packages || 0, label: '我的任务包' },
       { icon: Warning, color: '#7C3AED', bg: '#EDE9FE', value: counts.value.pending_packages || 0, label: '待接收' },
       { icon: List, color: '#D97706', bg: '#FEF3C7', value: counts.value.active_tasks || 0, label: '检测中任务' },
-      { icon: Checked, color: '#059669', bg: '#D1FAE5', value: counts.value.completed_tasks || 0, label: '已完成任务' },
+      { icon: Clock, color: '#2563EB', bg: '#DBEAFE', value: counts.value.review_pending_tasks || 0, label: '待复核' },
+      { icon: Warning, color: '#DC2626', bg: '#FEE2E2', value: counts.value.returned_tasks || 0, label: '需修改' },
+      { icon: Checked, color: '#059669', bg: '#D1FAE5', value: counts.value.completed_tasks || 0, label: '已完成' },
     )
   } else if (r === '复核员') {
     all.push(

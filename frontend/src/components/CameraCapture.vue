@@ -1,276 +1,258 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Camera, Switch, VideoPause, Upload } from '@element-plus/icons-vue'
+import { ref, onBeforeUnmount, nextTick } from 'vue'
 
 const props = defineProps({
-  modelValue: { type: File, default: null },
-  previewUrl: { type: String, default: '' },
+  checkpoint: { type: Object, required: true },
+  sampleNo: { type: String, default: '' },
+  cameraHint: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:modelValue', 'update:previewUrl', 'capture'])
+const emit = defineEmits(['photo-taken', 'close'])
 
-// ── 摄像头状态 ──
-const stream = ref(null)
 const videoRef = ref(null)
 const canvasRef = ref(null)
-const fileInputRef = ref(null)
+const stream = ref(null)
+const isCapturing = ref(false)
+const error = ref('')
+const facingMode = ref('environment')
+const devices = ref([])
+const videoReady = ref(false)
 
-const isCameraActive = ref(false)
-const cameraError = ref('')
-const availableCameras = ref([])       // [{deviceId, label, facing}]
-const currentFacing = ref('environment') // 'user'=前置, 'environment'=后置
-const capturing = ref(false)
-
-// ── 检测设备类型 ──
-function isMobile() {
-  return /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent) ||
-    ('ontouchstart' in window && window.innerWidth < 1024)
-}
-
-// ── 枚举摄像头 ──
-async function enumCameras() {
-  try {
-    // 需要先请求一次权限才能拿到 label
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    availableCameras.value = devices
-      .filter(d => d.kind === 'videoinput')
-      .map(d => {
-        // 推断方向：label 中包含 front/user/前置 → 前置，rear/back/environment/后置 → 后置
-        const label = (d.label || '').toLowerCase()
-        let facing = 'unknown'
-        if (/front|user|前置|正面/.test(label)) facing = 'user'
-        else if (/rear|back|environment|后置|背面|顶部/.test(label)) facing = 'environment'
-        else if (/integrated|built-in|内建|内置/.test(label)) facing = 'user'
-        return { deviceId: d.deviceId, label: d.label || `摄像头 ${availableCameras.value.length + 1}`, facing }
-      })
-
-    // 默认方向：PC 用前置，手机用后置
-    if (availableCameras.value.length > 1) {
-      currentFacing.value = isMobile() ? 'environment' : 'user'
-    } else if (availableCameras.value.length === 1) {
-      currentFacing.value = availableCameras.value[0].facing !== 'environment' ? 'user' : 'environment'
-    }
-  } catch {
-    availableCameras.value = []
+function cameraErrorMsg(err) {
+  const map = {
+    NotAllowedError: '摄像头权限被拒绝，请在浏览器设置中允许访问摄像头',
+    NotFoundError: '未检测到摄像头设备',
+    NotReadableError: '摄像头被占用，请关闭其他使用摄像头的程序',
+    OverconstrainedError: '摄像头不支持所需参数',
+    AbortError: '摄像头操作被中止',
   }
+  return map[err.name] || `摄像头错误: ${err.message || err.name}`
 }
 
-// ── 选择当前方向的设备 ID ──
-function currentDeviceId() {
-  const match = availableCameras.value.find(c => c.facing === currentFacing.value)
-  if (match) return match.deviceId
-  // fallback：没有匹配 facing 时取第一个
-  if (availableCameras.value.length > 0) return availableCameras.value[0].deviceId
-  return undefined
-}
+async function start() {
+  error.value = ''
+  videoReady.value = false
 
-// ── 启动摄像头 ──
-async function startCamera() {
-  cameraError.value = ''
-  const deviceId = currentDeviceId()
-  const constraints = {
-    video: {
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      facingMode: currentFacing.value === 'user' ? 'user' : 'environment',
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
-    audio: false,
-  }
   try {
-    const s = await navigator.mediaDevices.getUserMedia(constraints)
+    const allDevices = await navigator.mediaDevices.enumerateDevices()
+    devices.value = allDevices.filter(d => d.kind === 'videoinput')
+  } catch { }
+
+  await nextTick()
+
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facingMode.value, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    })
     stream.value = s
     if (videoRef.value) {
       videoRef.value.srcObject = s
-      await videoRef.value.play()
-    }
-    isCameraActive.value = true
-  } catch (err) {
-    // 如果 exact deviceId 失败，用 facingMode 重试
-    if (deviceId && err.name === 'OverconstrainedError') {
-      try {
-        const s2 = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacing.value }, audio: false })
-        stream.value = s2
-        if (videoRef.value) {
-          videoRef.value.srcObject = s2
-          await videoRef.value.play()
+      await new Promise((resolve, reject) => {
+        if (!videoRef.value) return reject(new Error('no video'))
+        videoRef.value.onloadedmetadata = () => {
+          videoRef.value.play().then(resolve).catch(reject)
         }
-        isCameraActive.value = true
-        return
-      } catch {}
+        setTimeout(() => reject(new Error('视频加载超时')), 5000)
+      })
+      videoReady.value = true
     }
-    cameraError.value = '无法访问摄像头: ' + (err.message || err.name)
+  } catch (err) {
+    if (err.name === 'OverconstrainedError') {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        stream.value = s
+        if (videoRef.value) {
+          videoRef.value.srcObject = s
+          await new Promise((resolve, reject) => {
+            videoRef.value.onloadedmetadata = () => {
+              videoRef.value.play().then(resolve).catch(reject)
+            }
+            setTimeout(() => reject(new Error('视频加载超时')), 5000)
+          })
+          videoReady.value = true
+          return
+        }
+      } catch (fbErr) {
+        error.value = cameraErrorMsg(fbErr)
+      }
+    } else {
+      error.value = cameraErrorMsg(err)
+    }
   }
 }
 
-// ── 停止摄像头 ──
-function stopCamera() {
-  if (stream.value) {
-    stream.value.getTracks().forEach(t => t.stop())
-    stream.value = null
-  }
-  isCameraActive.value = false
+async function switchCamera() {
+  if (stream.value) stream.value.getTracks().forEach(t => t.stop())
+  facingMode.value = facingMode.value === 'environment' ? 'user' : 'environment'
+  await start()
 }
 
-// ── 切换前后摄像头 ──
-function switchCamera() {
-  currentFacing.value = currentFacing.value === 'user' ? 'environment' : 'user'
-  stopCamera()
-  startCamera()
-}
-
-// ── 拍照 ──
-function takePhoto() {
+function capture() {
   const video = videoRef.value
   const canvas = canvasRef.value
-  if (!video || !canvas) return
-
-  capturing.value = true
-  const ctx = canvas.getContext('2d')
+  if (!video || !canvas || !videoReady.value) return
+  isCapturing.value = true
   canvas.width = video.videoWidth || 1280
   canvas.height = video.videoHeight || 720
+  const ctx = canvas.getContext('2d')
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
+  // Draw timestamp watermark at bottom-right corner
+  const now = new Date()
+  const ts = now.getFullYear() + '-'
+    + String(now.getMonth() + 1).padStart(2, '0') + '-'
+    + String(now.getDate()).padStart(2, '0') + ' '
+    + String(now.getHours()).padStart(2, '0') + ':'
+    + String(now.getMinutes()).padStart(2, '0') + ':'
+    + String(now.getSeconds()).padStart(2, '0')
+  const fontSize = Math.max(14, Math.round(canvas.width * 0.025))
+  ctx.font = `${fontSize}px "Courier New", monospace`
+  const metrics = ctx.measureText(ts)
+  const textW = metrics.width
+  const textH = fontSize * 1.2
+  const padX = fontSize * 0.5
+  const padY = fontSize * 0.3
+  const x = canvas.width - textW - padX * 2 - 8
+  const y = canvas.height - textH - padY - 8
+  // Semi-transparent dark background
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+  ctx.fillRect(x, y, textW + padX * 2, textH + padY)
+  // White text
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)'
+  ctx.textBaseline = 'bottom'
+  ctx.fillText(ts, x + padX, y + textH)
+
   canvas.toBlob((blob) => {
-    if (!blob) { capturing.value = false; return }
-    const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
+    isCapturing.value = false
+    if (!blob) return
+    const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' })
     const url = URL.createObjectURL(blob)
-    emit('update:modelValue', file)
-    emit('update:previewUrl', url)
-    emit('capture', { file, previewUrl: url })
-    capturing.value = false
-    stopCamera()
+    emit('photo-taken', { file, previewUrl: url, sampleNo: props.sampleNo })
+    close()
   }, 'image/jpeg', 0.9)
 }
 
-// ── 文件上传回退 ──
-function handleFileInput(event) {
-  const file = event.target.files?.[0]
+function handleFileInput(e) {
+  const file = e.target.files?.[0]
   if (!file) return
-  const url = URL.createObjectURL(file)
-  emit('update:modelValue', file)
-  emit('update:previewUrl', url)
-  emit('capture', { file, previewUrl: url })
+  // Draw uploaded image onto canvas to add timestamp watermark
+  const img = new Image()
+  img.onload = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+    // Timestamp watermark
+    const now = new Date()
+    const ts = now.getFullYear() + '-'
+      + String(now.getMonth() + 1).padStart(2, '0') + '-'
+      + String(now.getDate()).padStart(2, '0') + ' '
+      + String(now.getHours()).padStart(2, '0') + ':'
+      + String(now.getMinutes()).padStart(2, '0') + ':'
+      + String(now.getSeconds()).padStart(2, '0')
+    const fontSize = Math.max(14, Math.round(canvas.width * 0.025))
+    ctx.font = `${fontSize}px "Courier New", monospace`
+    const metrics = ctx.measureText(ts)
+    const textW = metrics.width
+    const textH = fontSize * 1.2
+    const padX = fontSize * 0.5
+    const padY = fontSize * 0.3
+    const x = canvas.width - textW - padX * 2 - 8
+    const y = canvas.height - textH - padY - 8
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fillRect(x, y, textW + padX * 2, textH + padY)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText(ts, x + padX, y + textH)
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        // Fallback: use original file if canvas fails
+        const url = URL.createObjectURL(file)
+        emit('photo-taken', { file, previewUrl: url, sampleNo: props.sampleNo })
+        close()
+        return
+      }
+      const stampedFile = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' })
+      const url = URL.createObjectURL(blob)
+      emit('photo-taken', { file: stampedFile, previewUrl: url, sampleNo: props.sampleNo })
+      close()
+    }, 'image/jpeg', 0.92)
+  }
+  img.onerror = () => {
+    const url = URL.createObjectURL(file)
+    emit('photo-taken', { file, previewUrl: url, sampleNo: props.sampleNo })
+    close()
+  }
+  img.src = URL.createObjectURL(file)
 }
 
-// ── 触发文件选择 ──
-function triggerFileInput() {
-  fileInputRef.value?.click()
+function close() {
+  if (stream.value) { stream.value.getTracks().forEach(t => t.stop()); stream.value = null }
+  videoReady.value = false
+  error.value = ''
+  emit('close')
 }
-
-// ── 初始化 ──
-onMounted(async () => {
-  await enumCameras()
-})
 
 onBeforeUnmount(() => {
-  stopCamera()
+  if (stream.value) stream.value.getTracks().forEach(t => t.stop())
 })
+
+start()
 </script>
 
 <template>
-  <div class="camera-capture">
-    <!-- 已有照片预览 -->
-    <div v-if="previewUrl" class="preview-wrap">
-      <img :src="previewUrl" class="preview-img" />
-      <div class="preview-actions">
-        <el-button size="small" @click="startCamera">重拍</el-button>
-        <el-button size="small" type="danger" @click="emit('update:previewUrl', ''); emit('update:modelValue', null)">删除</el-button>
+  <div class="camera-inline">
+    <div v-if="error" class="cam-error">
+      <div class="cam-error-msg">⚠️ {{ error }}</div>
+      <div class="cam-error-actions">
+        <el-button size="small" @click="start">重试</el-button>
+        <label class="file-btn">
+          📁 从文件选择
+          <input type="file" accept="image/*" @change="handleFileInput" style="display:none" />
+        </label>
+        <el-button size="small" @click="close">取消</el-button>
       </div>
     </div>
 
-    <!-- 摄像头预览 -->
-    <div v-else-if="isCameraActive" class="camera-preview">
-      <video ref="videoRef" class="video-feed" autoplay playsinline muted />
+    <div v-show="!error" class="cam-viewfinder" :class="{ ready: videoReady }">
+      <video ref="videoRef" autoplay playsinline muted class="cam-video" />
+      <div v-if="!videoReady" class="cam-loading">
+        <span>正在启动摄像头…</span>
+      </div>
       <canvas ref="canvasRef" style="display:none" />
-      <div class="camera-controls">
-        <el-button
-          v-if="availableCameras.length > 1"
-          circle :icon="Switch"
-          @click="switchCamera"
-          title="切换前后摄像头"
-        />
-        <el-button type="primary" circle class="capture-btn" :loading="capturing" @click="takePhoto" title="拍照">
-          <span class="capture-dot" v-if="!capturing" />
+      <div class="cam-controls">
+        <el-button v-if="devices.length > 1" circle size="small" @click="switchCamera" :disabled="isCapturing">🔄</el-button>
+        <el-button type="primary" circle class="snap-btn" :loading="isCapturing" @click="capture" :disabled="!videoReady || isCapturing">
+          <span v-if="!isCapturing" class="snap-dot" />
         </el-button>
-        <el-button circle :icon="VideoPause" @click="stopCamera" title="关闭摄像头" />
+        <el-button circle size="small" @click="close" :disabled="isCapturing">✕</el-button>
       </div>
-      <div class="facing-hint">{{ currentFacing === 'user' ? '前置' : '后置' }}摄像头</div>
-    </div>
-
-    <!-- 启动/上传选择 -->
-    <div v-else class="capture-actions">
-      <div v-if="cameraError" class="error-msg">{{ cameraError }}</div>
-      <el-button type="primary" :icon="Camera" @click="startCamera" :disabled="!('mediaDevices' in navigator)">
-        拍照
-      </el-button>
-      <el-button :icon="Upload" @click="triggerFileInput">上传照片</el-button>
-      <input ref="fileInputRef" type="file" accept="image/*" style="display:none" @change="handleFileInput" />
+      <div class="cam-hint">
+        <span>拍摄：<strong>{{ checkpoint.label }}</strong></span>
+        <span v-if="sampleNo" class="sn-tag">样品 {{ sampleNo }}</span>
+        <span v-if="cameraHint" class="tip">📷 {{ cameraHint }}</span>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.camera-capture { width: 100%; }
-
-.preview-wrap { position: relative; }
-.preview-img {
-  width: 100%;
-  max-height: 200px;
-  object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid #E2E8F0;
-}
-.preview-actions {
-  display: flex; gap: 6px; margin-top: 6px; justify-content: center;
-}
-
-.camera-preview {
-  position: relative;
-  background: #000;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.video-feed {
-  width: 100%;
-  display: block;
-  max-height: 300px;
-  object-fit: contain;
-  background: #0F172A;
-}
-.camera-controls {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0;
-  background: rgba(0,0,0,0.85);
-}
-.capture-btn {
-  width: 56px !important;
-  height: 56px !important;
-  border: 3px solid #fff !important;
-  background: transparent !important;
-}
-.capture-dot {
-  display: inline-block;
-  width: 38px; height: 38px;
-  border-radius: 50%;
-  background: #fff;
-}
-.facing-hint {
-  position: absolute; top: 8px; right: 12px;
-  background: rgba(0,0,0,0.6); color: #fff;
-  padding: 2px 8px; border-radius: 4px;
-  font-size: 12px;
-}
-
-.capture-actions {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  justify-content: center; padding: 10px 0;
-}
-.error-msg {
-  width: 100%; text-align: center;
-  color: #EF4444; font-size: 12px; margin-bottom: 4px;
-}
+.camera-inline { border: 2px solid #3B82F6; border-radius: 10px; overflow: hidden; background: #0F172A; margin-top: 8px; }
+.cam-video { width: 100%; max-height: 320px; display: block; background: #000; object-fit: contain; }
+.cam-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 14px; background: rgba(15,23,42,0.95); }
+.cam-viewfinder { position: relative; }
+.cam-viewfinder.ready .cam-loading { display: none; }
+.cam-controls { display: flex; justify-content: center; align-items: center; gap: 20px; padding: 10px; background: #1E293B; }
+.snap-btn { width: 52px !important; height: 52px !important; }
+.snap-dot { width: 36px; height: 36px; border-radius: 50%; background: white; display: block; border: 3px solid #CBD5E1; }
+.cam-hint { padding: 6px 12px; font-size: 12px; color: #CBD5E1; background: #0F172A; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sn-tag { color: #60A5FA; font-weight: 600; }
+.tip { color: #FBBF24; font-weight: 500; }
+.cam-error { padding: 14px; text-align: center; }
+.cam-error-msg { color: #EF4444; font-size: 13px; margin-bottom: 10px; }
+.cam-error-actions { display: flex; gap: 8px; justify-content: center; align-items: center; }
+.file-btn { display: inline-flex; align-items: center; padding: 5px 12px; font-size: 12px; border-radius: 4px; border: 1px solid #D1D5DB; background: white; cursor: pointer; color: #374151; }
+.file-btn:hover { background: #F3F4F6; }
 </style>

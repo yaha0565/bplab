@@ -1,6 +1,7 @@
 """委托单 API"""
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from datetime import date
@@ -11,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.services.audit_service import log_operation, log_modification
 
 router = APIRouter(prefix="/commissions", tags=["委托单"])
 
@@ -38,6 +40,7 @@ class CommissionDetail(BaseModel):
     notes: str | None
     created_by: str | None
     created_at: str | None
+    total_sample_count: int = 0
     sample_groups: list[dict] = []
     samples: list[dict] = []
 
@@ -58,7 +61,7 @@ async def list_commissions(
         params["status"] = status
 
     result = await db.execute(
-        text(f"SELECT commission_no, client_name, production_org_name, commission_date, status, created_at FROM commissions {where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset"),
+        text(f"SELECT commission_no, client_name, production_org_name, commission_date, status, created_at AT TIME ZONE 'Asia/Shanghai' FROM commissions {where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset"),
         {**params, "limit": limit, "offset": offset},
     )
     return [
@@ -89,10 +92,13 @@ async def get_commission(
 
     # 样品组
     groups_result = await db.execute(
-        text("SELECT id, group_no, sample_name, model, material_name, quantity, status FROM sample_groups WHERE commission_no=:c AND is_void=FALSE ORDER BY id"),
+        text("SELECT id, group_no, sample_name, model, material_name, experiment_codes, batch_no, quantity, status FROM sample_groups WHERE commission_no=:c AND is_void=FALSE ORDER BY id"),
         {"c": commission_no},
     )
     groups = [dict(zip(groups_result.keys(), r)) for r in groups_result.fetchall()]
+
+    # 计算样品总数 = 各样品组 quantity 之和
+    total_sample_count = sum(g.get("quantity", 0) or 0 for g in groups)
 
     # 样品
     samples_result = await db.execute(
@@ -115,6 +121,7 @@ async def get_commission(
         notes=comm.get("notes"),
         created_by=comm.get("created_by"),
         created_at=str(comm["created_at"]) if comm.get("created_at") else None,
+        total_sample_count=total_sample_count,
         sample_groups=groups,
         samples=samples,
     )
@@ -178,7 +185,7 @@ async def create_commission(
               commission_date, due_date, notes, status, created_by, created_at, updated_at)
             VALUES (:cn, :coi, :cnm, :ca, :ct, :ph,
               :poi, :pnm, :pr,
-              :cd, :dd, :nt, '已入库', :cb, now(), now())
+              :cd, :dd, :nt, '已入库', :cb, localtimestamp, localtimestamp)
         """),
         {
             "cn": commission_no, "coi": body.client_org_id,
@@ -188,6 +195,13 @@ async def create_commission(
             "cb": user["username"],
         },
     )
+
+    # 显式提交，确保后续请求能立即看到该委托单
+    await db.commit()
+
+    # 审计日志
+    await log_operation(db, "commission", commission_no, user, "创建委托",
+                         commission_no=commission_no, comment=f"委托单位:{client_row[0]}")
 
     return CommissionBrief(
         commission_no=commission_no,
@@ -202,12 +216,12 @@ async def create_commission(
 # ── 样品组创建 ──
 
 class SampleGroupCreate(BaseModel):
+    catalog_id: int | None = None
     material_name: str
     sample_count: int = Field(ge=1, le=200)
     experiment_codes: list[str] = Field(default_factory=list)
     experiments: list[str] = Field(default_factory=list)
-    batch_no: str | None = None
-    heat_no: str | None = None
+    batch_no: str = Field(min_length=1)
     notes: str | None = None
 
 
@@ -235,6 +249,23 @@ async def create_sample_group(
     if not comm_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="委托单不存在")
 
+    # 如果提供了 catalog_id，从样品资料库中获取预设信息
+    catalog_model = "标准"
+    catalog_material = body.material_name
+    if body.catalog_id:
+        cat_result = await db.execute(
+            text("SELECT sample_name, model, material_name, experiment_codes FROM sample_catalog WHERE id=:i AND enabled=TRUE"),
+            {"i": body.catalog_id},
+        )
+        cat_row = cat_result.fetchone()
+        if cat_row:
+            catalog_material = cat_row[2] or body.material_name
+            catalog_model = cat_row[1] or "标准"
+            # 如果前端未指定检测项目，则使用资料库中的预设
+            if not body.experiment_codes and cat_row[3]:
+                preset_codes = json.loads(cat_row[3]) if isinstance(cat_row[3], str) else cat_row[3]
+                body.experiment_codes = preset_codes
+
     # 生成样品组编号: BP + YYYYMMDD + 3位序号
     today_str = str(comm_row[1]) if comm_row[1] else "2026-01-01"
     date_part = today_str.replace("-", "") if "-" in today_str else today_str
@@ -250,17 +281,18 @@ async def create_sample_group(
     # 生成样品编号
     sample_nos = [f"{group_no}-S{i+1:02d}" for i in range(body.sample_count)]
 
-    # 插入样品组（只使用表中实际存在的列）
+    # 插入样品组（使用资料库信息或前端传入值）
+    ecodes_str = ", ".join(body.experiment_codes) if body.experiment_codes else ""
     await db.execute(
         text("""
-            INSERT INTO sample_groups (group_no, commission_no, sample_name, material_name,
-              quantity, model, status, notes, updated_at)
-            VALUES (:gn, :cn, :sn, :mn, :qty, :md, '已入库', :nt, now())
+            INSERT INTO sample_groups (group_no, commission_no, catalog_id, sample_name, material_name,
+              model, batch_no, experiment_codes, quantity, status, notes, updated_at)
+            VALUES (:gn, :cn, :cid, :sn, :mn, :md, :bn, :ec, :qty, '已入库', :nt, localtimestamp)
         """),
         {
-            "gn": group_no, "cn": commission_no, "sn": body.material_name,
-            "mn": body.material_name, "qty": body.sample_count, "md": "标准",
-            "nt": body.notes,
+            "gn": group_no, "cn": commission_no, "cid": body.catalog_id,
+            "sn": catalog_material, "mn": catalog_material, "md": catalog_model,
+            "bn": body.batch_no, "ec": ecodes_str, "qty": body.sample_count, "nt": body.notes,
         },
     )
 
@@ -271,19 +303,24 @@ async def create_sample_group(
     )
     group_id = gid_result.fetchone()[0]
 
-    # 插入样品（只使用表中实际存在的列）
+    # 插入样品（使用资料库信息）
     for sno in sample_nos:
         await db.execute(
             text("""
                 INSERT INTO samples (sample_no, group_id, group_no, commission_no, sample_name,
                   material_name, condition, current_location, status, created_at, updated_at)
-                VALUES (:sn, :gid, :gn, :cn, :snm, :mn, '待检', '样品库', '待检', now(), now())
+                VALUES (:sn, :gid, :gn, :cn, :snm, :mn, '待检', '样品库', '待检', localtimestamp, localtimestamp)
             """),
             {
                 "sn": sno, "gid": group_id, "gn": group_no, "cn": commission_no,
-                "snm": body.material_name, "mn": body.material_name,
+                "snm": catalog_material, "mn": catalog_material,
             },
         )
+
+    # 审计日志
+    await log_operation(db, "sample_group", group_no, user, "创建样品组",
+                         commission_no=commission_no,
+                         comment=f"样品数:{body.sample_count} 检测项目:{','.join(body.experiment_codes)}")
 
     return SampleGroupResponse(
         group_no=group_no,

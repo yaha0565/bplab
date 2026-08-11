@@ -72,7 +72,7 @@ async def _audit(db: AsyncSession, entity_type: str, entity_id: str, actor: str,
     await db.execute(
         text("""INSERT INTO audit_logs (entity_type, entity_id, actor, action, field_name,
                 old_value, new_value, created_at)
-                VALUES (:et, :eid, :a, :act, :fn, :ov, :nv, now())"""),
+                VALUES (:et, :eid, :a, :act, :fn, :ov, :nv, localtimestamp)"""),
         {"et": entity_type, "eid": entity_id, "a": actor, "act": action,
          "fn": field_name, "ov": old_value, "nv": new_value},
     )
@@ -224,7 +224,7 @@ async def create_incident(
         frozen_version = record[0]
         # 更新记录状态为故障中断作废
         await db.execute(
-            text("""UPDATE records SET status='故障中断作废', updated_at=now()
+            text("""UPDATE records SET status='故障中断作废', updated_at=localtimestamp
                     WHERE task_no=:tn AND version=:v"""),
             {"tn": body.task_no, "v": frozen_version},
         )
@@ -241,8 +241,8 @@ async def create_incident(
             ) VALUES (
                 :ino, :tn, :pkg, :cno, :gid, :eno, :enm, :rpt, :ts,
                 :ft, :fd, :ec, :cs, :cps, :cd, :sc,
-                :rt::jsonb, :ia::jsonb, :isamp::jsonb,
-                :fv, '待样品隔离', now(), now()
+                CAST(:rt AS jsonb), CAST(:ia AS jsonb), CAST(:isamp AS jsonb),
+                :fv, '待样品隔离', localtimestamp, localtimestamp
             )"""),
         {
             "ino": incident_no, "tn": body.task_no,
@@ -263,30 +263,30 @@ async def create_incident(
     # 记录操作
     await db.execute(
         text("""INSERT INTO equipment_incident_actions (incident_no, actor, action, comment, created_at)
-                VALUES (:ino, :a, '实验员报告设备故障并中断试验', '系统冻结当前记录、停用设备并隔离样品', now())"""),
+                VALUES (:ino, :a, '实验员报告设备故障并中断试验', '系统冻结当前记录、停用设备并隔离样品', localtimestamp)"""),
         {"ino": incident_no, "a": actor},
     )
 
     # 更新任务/任务包/样品组状态
     await db.execute(
         text("""UPDATE tasks SET status='设备故障中断',
-                experiment_ended_at=COALESCE(experiment_ended_at, now()), updated_at=now()
+                experiment_ended_at=COALESCE(experiment_ended_at, localtimestamp), updated_at=localtimestamp
                 WHERE task_no=:tn"""),
         {"tn": body.task_no},
     )
     await db.execute(
-        text("UPDATE task_packages SET status='设备故障中断', updated_at=now() WHERE package_no=:pn"),
+        text("UPDATE task_packages SET status='设备故障中断', updated_at=localtimestamp WHERE package_no=:pn"),
         {"pn": task.get("package_no")},
     )
     await db.execute(
-        text("UPDATE sample_groups SET status='故障隔离', updated_at=now() WHERE id=:gid"),
+        text("UPDATE sample_groups SET status='故障隔离', updated_at=localtimestamp WHERE id=:gid"),
         {"gid": task.get("group_id")},
     )
 
     # 停用设备
     await db.execute(
         text("""UPDATE equipment_registry SET enabled=FALSE, lifecycle_status='停用',
-                status_note=:sn, updated_at=now() WHERE management_no=:mn"""),
+                status_note=:sn, updated_at=localtimestamp WHERE management_no=:mn"""),
         {"sn": f"{incident_no} 设备故障试验中断，禁止使用", "mn": body.equipment_no},
     )
 
@@ -305,13 +305,13 @@ async def create_incident(
         old_row = old.fetchone()
         await db.execute(
             text("""UPDATE samples SET status='故障隔离', current_location='待确认隔离位置',
-                    current_holder='', updated_at=now() WHERE sample_no=:sn"""),
+                    current_holder='', updated_at=localtimestamp WHERE sample_no=:sn"""),
             {"sn": sno},
         )
         await db.execute(
             text("""INSERT INTO sample_events (sample_no, actor, action, from_status, to_status,
                     from_location, to_location, details, created_at)
-                    VALUES (:sn, :a, '设备故障中断隔离', :fs, '故障隔离', :fl, '待确认隔离位置', :det, now())"""),
+                    VALUES (:sn, :a, '设备故障中断隔离', :fs, '故障隔离', :fl, '待确认隔离位置', :det, localtimestamp)"""),
             {"sn": sno, "a": actor,
              "fs": old_row[0] if old_row else "", "fl": old_row[1] if old_row else "",
              "det": f"故障单:{incident_no};设备:{body.equipment_no}"},
@@ -357,7 +357,7 @@ async def isolate_incident(
     await db.execute(
         text("""UPDATE equipment_incidents SET status='待质量评估',
                 isolation_location=:loc, storage_requirements=:sr, receiver_note=:rn,
-                receiver_by=:a, receiver_at=now(), updated_at=now()
+                receiver_by=:a, receiver_at=localtimestamp, updated_at=localtimestamp
                 WHERE incident_no=:n"""),
         {"n": incident_no, "loc": body.isolation_location.strip(),
          "sr": body.storage_requirements.strip(), "rn": body.receiver_note.strip(), "a": actor},
@@ -368,20 +368,20 @@ async def isolate_incident(
     for sno in involved:
         await db.execute(
             text("""UPDATE samples SET status='故障隔离', current_location=:loc,
-                    current_holder=:a, updated_at=now() WHERE sample_no=:sn"""),
+                    current_holder=:a, updated_at=localtimestamp WHERE sample_no=:sn"""),
             {"loc": body.isolation_location.strip(), "a": actor, "sn": sno},
         )
         await db.execute(
             text("""INSERT INTO sample_events (sample_no, actor, action, from_status, to_status,
                     from_location, to_location, details, created_at)
-                    VALUES (:sn, :a, '确认故障隔离位置', '故障隔离', '故障隔离', '', :loc, :det, now())"""),
+                    VALUES (:sn, :a, '确认故障隔离位置', '故障隔离', '故障隔离', '', :loc, :det, localtimestamp)"""),
             {"sn": sno, "a": actor, "loc": body.isolation_location.strip(),
              "det": f"故障单:{incident_no};保存要求:{body.storage_requirements}"},
         )
 
     await db.execute(
         text("""INSERT INTO equipment_incident_actions (incident_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '确认样品隔离', :cmt, now())"""),
+                VALUES (:n, :a, '确认样品隔离', :cmt, localtimestamp)"""),
         {"n": incident_no, "a": actor,
          "cmt": f"位置:{body.isolation_location};保存要求:{body.storage_requirements};{body.receiver_note}"},
     )
@@ -432,7 +432,7 @@ async def assess_incident(
     await db.execute(
         text("""UPDATE equipment_incidents SET status='待管理员批准',
                 sample_validity=:sv, quality_conclusion=:qc, impact_scope=:isc,
-                quality_note=:qn, quality_by=:a, quality_at=now(), updated_at=now()
+                quality_note=:qn, quality_by=:a, quality_at=localtimestamp, updated_at=localtimestamp
                 WHERE incident_no=:n"""),
         {"n": incident_no, "sv": body.sample_validity, "qc": body.quality_conclusion.strip(),
          "isc": body.impact_scope.strip(), "qn": body.quality_note.strip(), "a": actor},
@@ -440,7 +440,7 @@ async def assess_incident(
 
     await db.execute(
         text("""INSERT INTO equipment_incident_actions (incident_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '提交质量评估', :cmt, now())"""),
+                VALUES (:n, :a, '提交质量评估', :cmt, localtimestamp)"""),
         {"n": incident_no, "a": actor,
          "cmt": f"{body.sample_validity};影响范围:{body.impact_scope};{body.quality_conclusion}"},
     )
@@ -511,14 +511,14 @@ async def approve_incident(
         await db.execute(
             text("""UPDATE equipment_incidents SET status=:st,
                     recovery_route=:rr, performance_check_result=:pcr, admin_note=:an,
-                    approved_by=:a, approved_at=now(), closed_at=now(), updated_at=now()
+                    approved_by=:a, approved_at=localtimestamp, closed_at=localtimestamp, updated_at=localtimestamp
                     WHERE incident_no=:n"""),
             {"n": incident_no, "st": new_status, "rr": body.recovery_route,
              "pcr": body.performance_check_result, "an": body.admin_note.strip(), "a": actor},
         )
         # 更新任务包状态
         await db.execute(
-            text("UPDATE task_packages SET status='样品失效待重新送样', updated_at=now() WHERE package_no=:pn"),
+            text("UPDATE task_packages SET status='样品失效待重新送样', updated_at=localtimestamp WHERE package_no=:pn"),
             {"pn": item.get("package_no")},
         )
     else:
@@ -529,7 +529,7 @@ async def approve_incident(
             # 原设备维修核查合格
             await db.execute(
                 text("""UPDATE equipment_registry SET enabled=TRUE, lifecycle_status='启用',
-                        status_note='维修核查合格，恢复使用', updated_at=now()
+                        status_note='维修核查合格，恢复使用', updated_at=localtimestamp
                         WHERE management_no=:mn"""),
                 {"mn": eq_to_restore},
             )
@@ -543,22 +543,22 @@ async def approve_incident(
 
         await db.execute(
             text("""INSERT INTO records (task_no, version, status, owner, payload, created_at, updated_at)
-                    VALUES (:tn, :v, '草稿', :ow, '{}'::jsonb, now(), now())"""),
+                    VALUES (:tn, :v, '草稿', :ow, CAST('{}' AS jsonb), localtimestamp, localtimestamp)"""),
             {"tn": item.get("task_no"), "v": new_version, "ow": item.get("reporter") or item.get("created_by")},
         )
 
         # 恢复任务和任务包状态
         await db.execute(
-            text("""UPDATE tasks SET status='退回修改', experiment_ended_at=NULL, updated_at=now()
+            text("""UPDATE tasks SET status='退回修改', experiment_ended_at=NULL, updated_at=localtimestamp
                     WHERE task_no=:tn"""),
             {"tn": item.get("task_no")},
         )
         await db.execute(
-            text("UPDATE task_packages SET status='检测中', updated_at=now() WHERE package_no=:pn"),
+            text("UPDATE task_packages SET status='检测中', updated_at=localtimestamp WHERE package_no=:pn"),
             {"pn": item.get("package_no")},
         )
         await db.execute(
-            text("UPDATE sample_groups SET status='检测中', updated_at=now() WHERE id=:gid"),
+            text("UPDATE sample_groups SET status='检测中', updated_at=localtimestamp WHERE id=:gid"),
             {"gid": item.get("group_id")},
         )
 
@@ -566,8 +566,8 @@ async def approve_incident(
             text("""UPDATE equipment_incidents SET status=:st,
                     recovery_route=:rr, performance_check_result=:pcr,
                     backup_equipment_no=:ben, admin_note=:an,
-                    approved_by=:a, approved_at=now(), resumed_record_version=:rv,
-                    closed_at=now(), updated_at=now()
+                    approved_by=:a, approved_at=localtimestamp, resumed_record_version=:rv,
+                    closed_at=localtimestamp, updated_at=localtimestamp
                     WHERE incident_no=:n"""),
             {"n": incident_no, "st": new_status, "rr": body.recovery_route,
              "pcr": body.performance_check_result, "ben": body.backup_equipment_no,
@@ -576,7 +576,7 @@ async def approve_incident(
 
     await db.execute(
         text("""INSERT INTO equipment_incident_actions (incident_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '技术批准恢复', :cmt, now())"""),
+                VALUES (:n, :a, '技术批准恢复', :cmt, localtimestamp)"""),
         {"n": incident_no, "a": actor,
          "cmt": f"{body.recovery_route};{body.admin_note}"},
     )

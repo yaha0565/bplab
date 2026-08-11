@@ -99,7 +99,7 @@ async def confirm_return(
     if loan[1] == "已确认":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该记录已确认回库")
 
-    now = text("now()")
+    now = text("localtimestamp")
     await db.execute(
         text("""
             UPDATE package_loans
@@ -125,7 +125,7 @@ async def confirm_return(
     await db.execute(
         text("""
             INSERT INTO audit_logs (entity_type, entity_id, actor, actor_name, actor_role, action, created_at)
-            VALUES ('package_loan', :eid, :actor, :name, :role, 'confirm_return', now())
+            VALUES ('package_loan', :eid, :actor, :name, :role, 'confirm_return', localtimestamp)
         """),
         {
             "eid": str(loan_id),
@@ -183,7 +183,7 @@ async def submit_loan(
                     package_no, sample_no, borrower, borrowed_at, purpose,
                     detection_location, issue_note, return_status, created_at, updated_at
                 ) VALUES (
-                    :pn, :sn, :b, now(), :p, :dl, :inote, '未归还', now(), now()
+                    :pn, :sn, :b, localtimestamp, :p, :dl, :inote, '未归还', localtimestamp, localtimestamp
                 )"""),
             {"pn": body.package_no, "sn": sno, "b": actor,
              "p": body.purpose, "dl": body.detection_location, "inote": body.issue_note},
@@ -191,7 +191,7 @@ async def submit_loan(
 
         # 更新样品状态
         await db.execute(
-            text("UPDATE samples SET status='借出中', current_holder=:a, updated_at=now() WHERE sample_no=:sn"),
+            text("UPDATE samples SET status='借出中', current_holder=:a, updated_at=localtimestamp WHERE sample_no=:sn"),
             {"sn": sno, "a": actor},
         )
         inserted.append(sno)
@@ -229,7 +229,7 @@ async def submit_return(
 
         await db.execute(
             text("""UPDATE package_loans SET return_status='已归还',
-                    returned_by=:b, returned_at=now(), updated_at=now()
+                    returned_by=:b, returned_at=localtimestamp, updated_at=localtimestamp
                     WHERE id=:id"""),
             {"id": loan[0], "b": actor},
         )
@@ -244,7 +244,7 @@ async def submit_return(
     for r in admins.fetchall():
         await db.execute(
             text("""INSERT INTO notifications (recipient, title, message, entity_type, entity_id, created_at)
-                    VALUES (:r, '样品待确认回库', :b, 'package_loan', :pn, now())"""),
+                    VALUES (:r, '样品待确认回库', :b, 'package_loan', :pn, localtimestamp)"""),
             {"r": r[0], "b": f"任务包{body.package_no}中{updated}个样品已归还，请确认回库", "pn": body.package_no},
         )
 

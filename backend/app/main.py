@@ -16,6 +16,22 @@ async def lifespan(app: FastAPI):
     from pathlib import Path
     for d in [settings.UPLOAD_DIR, settings.ATTACHMENT_DIR, settings.SIGNATURE_DIR]:
         Path(d).mkdir(parents=True, exist_ok=True)
+
+    # 首次启动自动填充基础数据（实验方法、配置版本等）
+    try:
+        from app.core.seed import auto_seed
+        result = await auto_seed()
+        if any(v > 0 for v in result.values()):
+            import logging
+            logging.getLogger(__name__).info(
+                f"Auto-seed 完成: methods={result['methods']}, "
+                f"configs={result['configs']}, equipment={result['equipment']}, "
+                f"bindings={result['bindings']}"
+            )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("Auto-seed 跳过（数据库可能尚未就绪）")
+
     yield
     # 关闭时清理连接池
     from app.database import engine
@@ -34,7 +50,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

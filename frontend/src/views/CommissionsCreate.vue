@@ -10,44 +10,71 @@ const formRef = ref(null)
 const loading = ref(false)
 const organizations = ref([])
 const methods = ref([])
+const catalog = ref([])
 
 const form = reactive({
   client_org_id: null,
   production_org_id: null,
   production_relation: '客户提供',
   commission_date: new Date().toISOString().slice(0, 10),
-  due_date: '',
+  due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
   notes: '',
 })
 
 // 样品组列表
 const sampleGroups = ref([{
+  catalog_id: null,
   material_name: '',
   sample_count: 1,
   experiment_codes: [],
   batch_no: '',
-  heat_no: '',
 }])
 
 const relations = ['客户提供', '自产', '外协', '合同制造']
 
 onMounted(async () => {
-  const [orgs, mtds] = await Promise.all([
+  const [orgs, mtds, cat] = await Promise.all([
     request.get('/organizations', { params: { limit: 500 } }),
     request.get('/methods'),
+    request.get('/catalog', { params: { limit: 500 } }),
   ])
   organizations.value = orgs.data
   methods.value = mtds.data
+  catalog.value = cat.data
 })
 
 function addSampleGroup() {
   sampleGroups.value.push({
+    catalog_id: null,
     material_name: '',
     sample_count: 1,
     experiment_codes: [],
     batch_no: '',
-    heat_no: '',
   })
+}
+
+function onCatalogSelect(idx, val) {
+  const sg = sampleGroups.value[idx]
+  // 数字 = 从资料库选择；字符串 = 用户自行输入的新材料
+  if (typeof val === 'number') {
+    const item = catalog.value.find(c => c.id === val)
+    if (item) {
+      sg.catalog_id = item.id
+      sg.material_name = item.material_name
+      // 自动填充资料库中预设的检测项目
+      if (item.experiment_codes && item.experiment_codes.length > 0) {
+        sg.experiment_codes = [...item.experiment_codes]
+      }
+    }
+  } else if (typeof val === 'string' && val.trim()) {
+    // 用户自行输入的材料名称
+    sg.catalog_id = null
+    sg.material_name = val.trim()
+  } else {
+    // 清空
+    sg.catalog_id = null
+    sg.material_name = ''
+  }
 }
 
 function removeSampleGroup(index) {
@@ -62,10 +89,10 @@ async function handleSubmit() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
 
-  // 验证至少一个样品组填写了材料
-  const validGroups = sampleGroups.value.filter(g => g.material_name.trim())
+  // 验证至少一个样品组填写了材料和批号
+  const validGroups = sampleGroups.value.filter(g => g.material_name.trim() && g.batch_no.trim())
   if (!validGroups.length) {
-    ElMessage.warning('请至少填写一个样品组的材料名称')
+    ElMessage.warning('请至少填写一个样品组的材料名称和批号')
     return
   }
 
@@ -84,12 +111,12 @@ async function handleSubmit() {
           .map(code => methods.value.find(m => m.experiment_code === code)?.experiment_name || code)
 
         await request.post(`/commissions/${commissionNo}/sample-groups`, {
+          catalog_id: g.catalog_id || null,
           material_name: g.material_name,
           sample_count: g.sample_count,
           experiment_codes: g.experiment_codes,
           experiments: expNames,
           batch_no: g.batch_no || null,
-          heat_no: g.heat_no || null,
         })
         groupCount++
       } catch (e) {
@@ -185,19 +212,34 @@ async function handleSubmit() {
           </div>
 
           <el-row :gutter="16">
-            <el-col :span="14">
+            <el-col :span="10">
               <el-form-item label="材料名称">
-                <el-input v-model="sg.material_name" placeholder="如 TC4钛合金、316L不锈钢" />
+                <el-select
+                  v-model="sg.catalog_id"
+                  filterable
+                  allow-create
+                  clearable
+                  placeholder="选择或输入材料名称"
+                  style="width:100%"
+                  @change="(val) => onCatalogSelect(idx, val)"
+                >
+                  <el-option
+                    v-for="c in catalog"
+                    :key="c.id"
+                    :label="`${c.material_name}  ${c.model}  ${c.sample_name}`"
+                    :value="c.id"
+                  />
+                </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="4">
+            <el-col :span="7">
               <el-form-item label="数量">
-                <el-input-number v-model="sg.sample_count" :min="1" :max="200" style="width:100%" />
+                <el-input-number v-model="sg.sample_count" :min="1" :max="200" controls-position="right" style="width:100%" />
               </el-form-item>
             </el-col>
-            <el-col :span="6">
-              <el-form-item label="批号">
-                <el-input v-model="sg.batch_no" placeholder="选填" />
+            <el-col :span="7">
+              <el-form-item label="批号" required>
+                <el-input v-model="sg.batch_no" placeholder="请输入批号" />
               </el-form-item>
             </el-col>
           </el-row>
@@ -217,10 +259,6 @@ async function handleSubmit() {
                 :value="m.experiment_code"
               />
             </el-select>
-          </el-form-item>
-
-          <el-form-item label="炉号">
-            <el-input v-model="sg.heat_no" placeholder="选填" style="max-width:300px" />
           </el-form-item>
         </div>
 

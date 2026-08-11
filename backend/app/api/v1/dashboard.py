@@ -22,6 +22,8 @@ class DashboardCounts(BaseModel):
     total_samples: int = 0          # 样品总数
     my_packages: int = 0            # 我的任务包
     completed_tasks: int = 0        # 已完成任务
+    returned_tasks: int = 0         # 退回修改任务（实验员）
+    review_pending_tasks: int = 0   # 待复核任务（实验员）
 
 
 @router.get("/counts", response_model=DashboardCounts)
@@ -56,6 +58,16 @@ async def dashboard_counts(
             text("SELECT COUNT(*) FROM tasks WHERE assignee=:u AND status='已完成'"),
             {"u": username})
         counts.completed_tasks = r.fetchone()[0]
+        # 退回修改的任务
+        r = await db.execute(
+            text("SELECT COUNT(*) FROM tasks WHERE assignee=:u AND status='退回修改'"),
+            {"u": username})
+        counts.returned_tasks = r.fetchone()[0]
+        # 待复核的任务（已提交复核，等待复核员审核）
+        r = await db.execute(
+            text("SELECT COUNT(*) FROM tasks WHERE assignee=:u AND status IN ('待复核', '更正待复核')"),
+            {"u": username})
+        counts.review_pending_tasks = r.fetchone()[0]
 
     # ── 复核员 ──
     elif role == "复核员":

@@ -39,12 +39,12 @@ async def mark_read(
     """标记通知为已读"""
     if body.ids:
         await db.execute(
-            text("UPDATE notifications SET read_at=now() WHERE recipient=:u AND id = ANY(:ids)"),
+            text("UPDATE notifications SET read_at=localtimestamp WHERE recipient=:u AND id = ANY(:ids)"),
             {"u": user["username"], "ids": body.ids},
         )
     else:
         await db.execute(
-            text("UPDATE notifications SET read_at=now() WHERE recipient=:u AND read_at IS NULL"),
+            text("UPDATE notifications SET read_at=localtimestamp WHERE recipient=:u AND read_at IS NULL"),
             {"u": user["username"]},
         )
     return {"message": "已标记为已读"}

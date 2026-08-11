@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_current_user, get_db, require_role
+from app.services.audit_service import log_operation
 
 router = APIRouter(prefix="/signatures", tags=["电子签名"])
 
@@ -37,7 +38,7 @@ async def list_signatures(
     result = await db.execute(
         text("""
             SELECT u.username, u.display_name, u.role,
-                   s.file_size, s.uploaded_at
+                   s.source_file, s.uploaded_at
             FROM users u
             LEFT JOIN signatures s ON u.username = s.username
             ORDER BY u.role, u.username
@@ -45,13 +46,17 @@ async def list_signatures(
     )
     out = []
     for r in result.fetchall():
-        has_sig = r[3] is not None
+        sig_file = r[3]
+        has_sig = sig_file is not None
+        sig_size = None
+        if sig_file and os.path.isfile(sig_file):
+            sig_size = round(os.path.getsize(sig_file) / 1024, 1)
         out.append(SignatureOut(
             username=r[0],
             display_name=r[1],
             role=r[2],
             has_signature=has_sig,
-            file_size_kb=round(r[3] / 1024, 1) if r[3] else None,
+            file_size_kb=sig_size,
             uploaded_at=str(r[4]) if r[4] else None,
         ))
     return out
@@ -97,10 +102,10 @@ async def upload_signature(
     await db.execute(
         text("""
             INSERT INTO signatures (username, file_path, sha256, file_size, uploaded_at, uploaded_by)
-            VALUES (:u, :fp, :sha, :fs, now(), :ub)
+            VALUES (:u, :fp, :sha, :fs, localtimestamp, :ub)
             ON CONFLICT (username) DO UPDATE SET
                 file_path = :fp2, sha256 = :sha2, file_size = :fs2,
-                uploaded_at = now(), uploaded_by = :ub2
+                uploaded_at = localtimestamp, uploaded_by = :ub2
         """),
         {
             "u": target_username, "fp": str(file_path), "sha": sha, "fs": file_size,
@@ -108,6 +113,9 @@ async def upload_signature(
             "fp2": str(file_path), "sha2": sha, "fs2": file_size, "ub2": current_user["username"],
         },
     )
+
+    # 审计日志
+    await log_operation(db, "signature", target_username, current_user, "上传签名")
 
     return {
         "message": f"签名已上传（{target_username}）",
@@ -161,5 +169,8 @@ async def delete_signature(
 
     # 删除数据库记录
     await db.execute(text("DELETE FROM signatures WHERE username=:u"), {"u": username})
+
+    # 审计日志
+    await log_operation(db, "signature", username, current_user, "删除签名")
 
     return {"message": f"已删除 {username} 的电子签名"}

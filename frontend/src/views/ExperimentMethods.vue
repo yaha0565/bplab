@@ -47,6 +47,12 @@ const editFields = ref([])          // [{key, label, type, default, options, rea
 const editColumns = ref([])         // [{column_key, column_label, column_type, column_default}]
 const editPhotos = ref([])          // [{code, label, required}]
 const editPrechecks = ref([])       // [{label}]
+const editEquipment = ref([])       // [{management_no, equipment_name, model, binding_role, required, note}]
+
+// 设备库搜索
+const equipSearch = ref('')
+const equipOptions = ref([])        // Available equipment from registry for dropdown
+const equipSearchLoading = ref(false)
 
 const FIELD_TYPES = ['text', 'number', 'date', 'datetime', 'select', 'multiselect', 'checkbox', 'textarea']
 const COLUMN_TYPES = ['number', 'calc', 'text', 'select:选项1|选项2']
@@ -183,18 +189,31 @@ async function openEditor(versionRow) {
     editColumns.value = (data.columns || []).map(c => ({ ...c, _dirty: false }))
     editPhotos.value = (data.photo_checkpoints || []).map(p => ({ code: p.code, label: p.label || p.checkpoint_label, required: p.required !== false, _dirty: false }))
     editPrechecks.value = (data.prechecks || []).map(p => ({ label: p.label || p.precheck_label || p.check_name, _dirty: false }))
+    editEquipment.value = (data.equipment || []).map(e => ({
+      management_no: e.management_no || '', equipment_name: e.equipment_name || '',
+      model: e.model || '', binding_role: e.binding_role || 'primary',
+      required: e.required || false, note: e.note || '', _dirty: false,
+      // Registry info (read-only, matches ExperimentRun Step 2 display)
+      measuring_range: e.measuring_range || '',
+      manufacturer: e.manufacturer || '',
+      serial_no: e.serial_no || '',
+      calibration_time: e.calibration_time || '',
+      equipment_class: e.equipment_class || '',
+      responsible: e.responsible || '',
+    }))
   } catch (e) {
     // 加载失败时初始化为空
     editFields.value = []
     editColumns.value = []
     editPhotos.value = []
     editPrechecks.value = []
+    editEquipment.value = []
   } finally { editorLoading.value = false }
 }
 
 // ── 从模板导入 ──
 async function loadFromTemplate() {
-  if (editFields.value.length || editColumns.value.length) {
+  if (editFields.value.length || editColumns.value.length || editEquipment.value.length) {
     try {
       await ElMessageBox.confirm('当前编辑器已有数据，导入模板将覆盖。确认？', '覆盖确认', { type: 'warning' })
     } catch { return }
@@ -207,7 +226,18 @@ async function loadFromTemplate() {
     editColumns.value = (data.columns || []).map(c => ({ ...c, _dirty: true }))
     editPhotos.value = (data.photo_checkpoints || []).map(p => ({ code: p.code || p.checkpoint_code, label: p.label || p.checkpoint_label, required: p.required !== false, _dirty: true }))
     editPrechecks.value = (data.prechecks || []).map(p => ({ label: p.label || p.checkpoint_label, _dirty: true }))
-    ElMessage.success(`已导入模板：${editFields.value.length} 字段, ${editColumns.value.length} 列, ${editPhotos.value.length} 拍照节点`)
+    editEquipment.value = (data.equipment || []).map(e => ({
+      management_no: e.management_no || '', equipment_name: e.equipment_name || '',
+      model: e.model || '', binding_role: e.binding_role || 'primary',
+      required: e.required || false, note: e.note || '', _dirty: true,
+      measuring_range: e.measuring_range || '',
+      manufacturer: e.manufacturer || '',
+      serial_no: e.serial_no || '',
+      calibration_time: e.calibration_time || '',
+      equipment_class: e.equipment_class || '',
+      responsible: e.responsible || '',
+    }))
+    ElMessage.success(`已导入模板：${editFields.value.length} 字段, ${editColumns.value.length} 列, ${editPhotos.value.length} 拍照节点, ${editEquipment.value.length} 设备`)
   } catch (e) {
     ElMessage.error('导入失败')
   } finally { editorLoading.value = false }
@@ -243,6 +273,41 @@ function addPrecheck() {
 }
 function removePrecheck(idx) { editPrechecks.value.splice(idx, 1) }
 
+// ── 设备绑定 ──
+async function searchEquipment(query) {
+  if (!query || query.length < 1) { equipOptions.value = []; return }
+  equipSearchLoading.value = true
+  try {
+    const { data } = await request.get('/equipment', { params: { search: query, limit: 20 } })
+    equipOptions.value = Array.isArray(data) ? data : []
+  } catch { equipOptions.value = [] }
+  finally { equipSearchLoading.value = false }
+}
+function addEquipment() {
+  editEquipment.value.push({
+    management_no: '', equipment_name: '', model: '',
+    binding_role: 'primary', required: true, note: '', _dirty: true,
+    measuring_range: '', manufacturer: '', serial_no: '',
+    calibration_time: '', equipment_class: '', responsible: '',
+  })
+}
+function selectEquipment(idx, equip) {
+  // Fill equipment info from registry selection (syncs with ExperimentRun Step 2 display)
+  const e = editEquipment.value[idx]
+  e.management_no = equip.management_no || ''
+  e.equipment_name = equip.equipment_name || ''
+  e.model = equip.model || ''
+  e.measuring_range = equip.measuring_range || ''
+  e.manufacturer = equip.manufacturer || ''
+  e.serial_no = equip.serial_no || ''
+  e.calibration_time = equip.calibration_time || ''
+  e.equipment_class = equip.equipment_class || ''
+  e.responsible = equip.responsible || ''
+  e._dirty = true
+  equipOptions.value = []
+}
+function removeEquipment(idx) { editEquipment.value.splice(idx, 1) }
+
 // ── 保存编辑器 ──
 async function saveEditor() {
   editorSaving.value = true
@@ -264,10 +329,14 @@ async function saveEditor() {
     const prechecksPayload = editPrechecks.value.map(p => ({
       precheck_label: p.label, precheck_code: '', is_required: true, sort_order: 0,
     }))
+    const equipmentPayload = editEquipment.value.map((e, i) => ({
+      management_no: e.management_no, binding_role: e.binding_role || 'primary',
+      required: e.required || false, sort_order: i, note: e.note || '',
+    }))
 
     await request.put(
       `/config/${editorExperimentCode.value}/versions/${editorVersion.value}`,
-      { fields: fieldsPayload, columns: columnsPayload, photo_checkpoints: photosPayload, prechecks: prechecksPayload },
+      { fields: fieldsPayload, columns: columnsPayload, photo_checkpoints: photosPayload, prechecks: prechecksPayload, equipment: equipmentPayload },
     )
     ElMessage.success('配置已保存')
     editorVisible.value = false
@@ -469,6 +538,70 @@ function parseOptionsInput(val) {
               <template #default="{ $index }"><el-button text type="danger" size="small" :icon="Delete" @click="removePrecheck($index)" /></template>
             </el-table-column>
           </el-table>
+        </el-tab-pane>
+
+        <!-- 设备绑定（与 ExperimentRun Step 2 设备确认已同步） -->
+        <el-tab-pane label="设备绑定" name="equipment">
+          <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+            <el-button size="small" :icon="Plus" @click="addEquipment">添加设备</el-button>
+            <span style="color:#94A3B8;font-size:12px">{{ editEquipment.length }} 台设备已绑定</span>
+          </div>
+          <el-table :data="editEquipment" size="small" stripe>
+            <el-table-column label="管理编号" width="160">
+              <template #default="{ row, $index }">
+                <el-select
+                  v-model="row.management_no"
+                  size="small"
+                  filterable
+                  remote
+                  :remote-method="searchEquipment"
+                  :loading="equipSearchLoading"
+                  placeholder="搜索设备"
+                  style="width:150px"
+                  @change="(val) => { const found = equipOptions.find(e => e.management_no === val); if (found) selectEquipment($index, found) }"
+                >
+                  <el-option v-for="eq in equipOptions" :key="eq.management_no" :label="`${eq.equipment_name} (${eq.management_no})`" :value="eq.management_no" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="equipment_name" label="设备名称" width="140">
+              <template #default="{ row }"><el-input v-model="row.equipment_name" size="small" placeholder="自动填充" /></template>
+            </el-table-column>
+            <el-table-column prop="model" label="型号" width="100">
+              <template #default="{ row }"><el-input v-model="row.model" size="small" placeholder="自动填充" /></template>
+            </el-table-column>
+            <el-table-column prop="binding_role" label="角色" width="90">
+              <template #default="{ row }">
+                <el-select v-model="row.binding_role" size="small" style="width:80px">
+                  <el-option label="主设备" value="primary" />
+                  <el-option label="辅助" value="auxiliary" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="required" label="必需" width="55">
+              <template #default="{ row }"><el-checkbox v-model="row.required" size="small" /></template>
+            </el-table-column>
+            <el-table-column label="台账信息（在Step 2中只读显示）" min-width="180">
+              <template #default="{ row }">
+                <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+                  <span v-if="row.manufacturer || row.model">厂家/型号：{{ [row.manufacturer, row.model].filter(Boolean).join(' / ') }}</span>
+                  <span v-if="row.measuring_range" style="display:block">测量范围：{{ row.measuring_range }}</span>
+                  <span v-if="row.serial_no" style="display:block">编号：{{ row.serial_no }}</span>
+                  <span v-if="row.calibration_time" style="display:block">校准：{{ row.calibration_time }}</span>
+                  <span v-if="!row.manufacturer && !row.measuring_range && !row.serial_no && !row.calibration_time" style="color:#CBD5E1">从设备库选择后自动带入</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="note" label="配置备注" width="120">
+              <template #default="{ row }"><el-input v-model="row.note" size="small" placeholder="可选" /></template>
+            </el-table-column>
+            <el-table-column label="" width="50">
+              <template #default="{ $index }"><el-button text type="danger" size="small" :icon="Delete" @click="removeEquipment($index)" /></template>
+            </el-table-column>
+          </el-table>
+          <div style="color:#94A3B8;font-size:12px;margin-top:8px">
+            此处绑定的设备会自动带入实验执行的「②设备与实验前检查」步骤。管理编号和角色/必需字段存储在配置版本中，设备名称、型号、测量范围等台账信息从设备库实时拉取，与Step 2显示一致。
+          </div>
         </el-tab-pane>
       </el-tabs>
 

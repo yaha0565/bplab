@@ -29,6 +29,7 @@ const routes = [
 
       // 记录 & 复核
       { path: 'pending-reviews', name: 'PendingReviews', component: () => import('../views/PendingReviews.vue'), meta: { title: '原始记录复核' } },
+      { path: 'records/:recordNo/v:version', name: 'RecordDetail', component: () => import('../views/RecordDetail.vue'), meta: { title: '原始记录查看' } },
 
       // 报告
       { path: 'reports', name: 'ReportsCenter', component: () => import('../views/ReportsCenter.vue'), meta: { title: '报告中心' } },
