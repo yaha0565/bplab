@@ -186,7 +186,7 @@ async def register_objection(
                 submitted_at, created_at, updated_at
             ) VALUES (
                 :ono, :rno, :cno, :cn, :ct, :desc, :en, :di, :isamp,
-                :ac, '调查中', :qi, :a, now(), now(), now()
+                :ac, '调查中', :qi, :a, localtimestamp, localtimestamp, localtimestamp
             )"""),
         {"ono": objection_no, "rno": body.report_no, "cno": report.get("commission_no", ""),
          "cn": body.client_name, "ct": body.contact, "desc": body.description,
@@ -196,13 +196,13 @@ async def register_objection(
 
     await db.execute(
         text("""INSERT INTO objection_actions (objection_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '登记客户异议', :c, now())"""),
+                VALUES (:n, :a, '登记客户异议', :c, localtimestamp)"""),
         {"n": objection_no, "a": actor, "c": body.description[:200]},
     )
 
     # 标记报告为异议处理中
     await db.execute(
-        text("UPDATE reports SET validity_status='异议处理中', updated_at=now() WHERE report_no=:r"),
+        text("UPDATE reports SET validity_status='异议处理中', updated_at=localtimestamp WHERE report_no=:r"),
         {"r": body.report_no},
     )
 
@@ -247,7 +247,7 @@ async def investigate_objection(
                 quality_evidence=:qe, quality_method_check=:qm, quality_equipment_check=:qeq,
                 quality_environment_check=:qen, quality_operation_check=:qo,
                 quality_calculation_check=:qc, impact_scope=:isc, treatment_suggestion=:ts,
-                status=:st, investigated_at=now(), updated_at=now()
+                status=:st, investigated_at=localtimestamp, updated_at=localtimestamp
                 WHERE objection_no=:n"""),
         {"n": objection_no, "pw": body.pathway, "inv": body.investigation,
          "tc": body.trace_conclusion, "qe": body.quality_evidence,
@@ -258,13 +258,13 @@ async def investigate_objection(
     )
 
     await db.execute(
-        text("UPDATE reports SET validity_status=:v, updated_at=now() WHERE report_no=:r"),
+        text("UPDATE reports SET validity_status=:v, updated_at=localtimestamp WHERE report_no=:r"),
         {"v": report_validity, "r": item.get("report_no")},
     )
 
     await db.execute(
         text("""INSERT INTO objection_actions (objection_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '提交调查结论', :c, now())"""),
+                VALUES (:n, :a, '提交调查结论', :c, localtimestamp)"""),
         {"n": objection_no, "a": actor, "c": f"{body.pathway}｜{body.trace_conclusion}"},
     )
 
@@ -307,13 +307,13 @@ async def record_retest_decision(
 
     await db.execute(
         text("""UPDATE objections SET customer_retest_decision=:d, retest_note=:n,
-                status=:st, updated_at=now() WHERE objection_no=:ono"""),
+                status=:st, updated_at=localtimestamp WHERE objection_no=:ono"""),
         {"d": body.decision, "n": body.note, "st": new_status, "ono": objection_no},
     )
 
     await db.execute(
         text("""INSERT INTO objection_actions (objection_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '记录客户重测决定', :c, now())"""),
+                VALUES (:n, :a, '记录客户重测决定', :c, localtimestamp)"""),
         {"n": objection_no, "a": actor, "c": f"{body.decision}｜{body.note}"},
     )
 
@@ -393,7 +393,7 @@ async def dispatch_retest(
                 assigned_at, notified_at, created_at, updated_at
             ) VALUES (
                 :pn, :cno, :gid, :gno, :a, :rv, :qi, :mn,
-                :sns::jsonb, :ecs::jsonb, :exps::jsonb, '待接收', :ab, now(), now(), now(), now()
+                CAST(:sns AS jsonb), CAST(:ecs AS jsonb), CAST(:exps AS jsonb), '待接收', :ab, localtimestamp, localtimestamp, localtimestamp, localtimestamp
             )"""),
         {"pn": package_no, "cno": orig.get("commission_no"), "gid": orig.get("group_id"),
          "gno": orig.get("group_no"), "a": body.assignee, "rv": reviewer, "qi": quality_inspector,
@@ -411,8 +411,8 @@ async def dispatch_retest(
                 experiment_code, experiment, method_code, standard, material_name,
                 assignee, reviewer, quality_inspector, status, created_at, updated_at
             ) VALUES (
-                :tn, :pn, :cno, :gid, :gno, :sns::jsonb,
-                :ec, :exp, :mc, :std, :mn, :a, :rv, :qi, '待接收', now(), now()
+                :tn, :pn, :cno, :gid, :gno, CAST(:sns AS jsonb),
+                :ec, :exp, :mc, :std, :mn, :a, :rv, :qi, '待接收', localtimestamp, localtimestamp
             )"""),
         {"tn": task_no, "pn": package_no, "cno": orig.get("commission_no"),
          "gid": orig.get("group_id"), "gno": orig.get("group_no"),
@@ -426,21 +426,21 @@ async def dispatch_retest(
     # 更新异议
     await db.execute(
         text("""UPDATE objections SET retest_task_no=:rt, status='重测任务已下发',
-                retest_note=COALESCE(retest_note,'')||:rn, updated_at=now()
+                retest_note=COALESCE(retest_note,'')||:rn, updated_at=localtimestamp
                 WHERE objection_no=:n"""),
         {"rt": task_no, "rn": f"；使用留样重测，任务{task_no}", "n": objection_no},
     )
 
     await db.execute(
         text("""INSERT INTO objection_actions (objection_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '下发留样重测任务', :c, now())"""),
+                VALUES (:n, :a, '下发留样重测任务', :c, localtimestamp)"""),
         {"n": objection_no, "a": actor, "c": task_no},
     )
 
     # 更新样品状态
     for sno in sample_nos:
         await db.execute(
-            text("UPDATE samples SET status='待接收重测', current_holder=:a, updated_at=now() WHERE sample_no=:sn"),
+            text("UPDATE samples SET status='待接收重测', current_holder=:a, updated_at=localtimestamp WHERE sample_no=:sn"),
             {"sn": sno, "a": body.assignee},
         )
 
@@ -477,13 +477,13 @@ async def prepare_response(
 
     await db.execute(
         text("""UPDATE objections SET response_text=:rt, response_method=:rm,
-                status='待发送', updated_at=now() WHERE objection_no=:n"""),
+                status='待发送', updated_at=localtimestamp WHERE objection_no=:n"""),
         {"rt": body.response_text, "rm": body.response_method, "n": objection_no},
     )
 
     await db.execute(
         text("""INSERT INTO objection_actions (objection_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '生成异议回复单', :c, now())"""),
+                VALUES (:n, :a, '生成异议回复单', :c, localtimestamp)"""),
         {"n": objection_no, "a": actor, "c": body.response_text[:200]},
     )
 
@@ -512,15 +512,15 @@ async def send_objection(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="异议回复尚未签发")
 
     await db.execute(
-        text("""UPDATE objections SET status='已归档', sent_by=:a, sent_at=now(),
-                archived_at=now(), response_receipt=:rc, updated_at=now()
+        text("""UPDATE objections SET status='已归档', sent_by=:a, sent_at=localtimestamp,
+                archived_at=localtimestamp, response_receipt=:rc, updated_at=localtimestamp
                 WHERE objection_no=:n"""),
         {"a": actor, "rc": body.note, "n": objection_no},
     )
 
     await db.execute(
         text("""INSERT INTO objection_actions (objection_no, actor, action, comment, created_at)
-                VALUES (:n, :a, '发送回复并自动归档', :c, now())"""),
+                VALUES (:n, :a, '发送回复并自动归档', :c, localtimestamp)"""),
         {"n": objection_no, "a": actor, "c": body.note},
     )
 

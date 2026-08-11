@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     TEMPLATE_DIR: Path = Path(__file__).parent.parent.parent / "templates"
 
     # ── CORS ──
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["*"]
 
     @property
     def DATABASE_URL(self) -> str:

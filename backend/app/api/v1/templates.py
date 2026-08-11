@@ -61,7 +61,15 @@ FORM_NAMES = {
 
 def _parse_template_filename(filename: str) -> dict:
     """从文件名解析模板信息。"""
+    import re
     name = filename.replace(".docx", "")
+    # 新格式: Rxxx_实验名称_CMA原始记录表
+    m = re.match(r'(R\d{3})_(.+?)(?:_CMA原始记录表)?$', name)
+    if m:
+        code = m.group(1)
+        exp_name = m.group(2)
+        return {"category": "RECORD", "display_name": f"{code} — {exp_name}", "experiment_code": code}
+    # 旧格式: RECORD_R001_xxx / SOP_R001_xxx
     if name.startswith("RECORD_"):
         code = name.replace("RECORD_", "")
         exp_name = RECORD_NAMES.get(code, code)
@@ -106,6 +114,34 @@ async def list_templates(
     return templates
 
 
+@router.get("/versions")
+async def list_template_versions(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[dict, Depends(get_current_user)],
+    experiment_code: str | None = Query(None, description="按实验编码过滤"),
+):
+    """获取模板版本列表（可按实验编码过滤）"""
+    where = ""
+    params: dict = {}
+    if experiment_code:
+        where = "WHERE experiment_code=:ec"
+        params["ec"] = experiment_code
+
+    result = await db.execute(
+        text(f"SELECT experiment_code, doc_type, file_name, version, effective_date, status, created_at "
+             f"FROM template_versions {where} ORDER BY experiment_code, doc_type"),
+        params,
+    )
+    return [
+        {
+            "experiment_code": r[0], "doc_type": r[1], "file_name": r[2],
+            "version": r[3], "effective_date": str(r[4]) if r[4] else None,
+            "status": r[5], "created_at": str(r[6]) if r[6] else None,
+        }
+        for r in result.fetchall()
+    ]
+
+
 @router.get("/{filename}")
 async def download_template(
     filename: str,
@@ -136,7 +172,7 @@ async def preview_template_html(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模板文件不存在")
 
     try:
-        from docx_preview import docx_review_html
+        from app.services.docx_preview import docx_review_html
         content = file_path.read_bytes()
         html = docx_review_html(content, filename)
         return HTMLResponse(content=html)

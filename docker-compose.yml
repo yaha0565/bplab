@@ -47,10 +47,15 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-to-a-random-secret-key}
       CORS_ORIGINS: '["http://localhost"]'
       DEBUG: "false"
+      # 可选: 指定设备 CSV 路径 (放在项目根目录 资料/ 下)
+      SEED_EQUIPMENT_CSV: ${SEED_EQUIPMENT_CSV:-}
+      SEED_BINDING_CSV: ${SEED_BINDING_CSV:-}
     volumes:
       - uploads:/app/data/uploads
       - attachments:/app/data/attachments
       - signatures:/app/data/signatures
+      - ./templates:/app/templates:ro
+      - ./资料:/app/资料:ro
     ports:
       - "127.0.0.1:8000:8000"
 

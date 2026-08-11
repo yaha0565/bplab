@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Application code
 COPY backend/ ./backend/
 
+# Templates (DOCX report/generation templates)
+COPY templates/ ./templates/
+
 # Create data directories
 RUN mkdir -p /app/data/uploads /app/data/attachments /app/data/signatures /app/logs
 

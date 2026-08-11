@@ -1,5 +1,7 @@
-"""SQLite → PostgreSQL 数据迁移
+"""SQLite → PostgreSQL 数据迁移 (遗留工具，仅用于从旧版 SQLite 迁移)
 用法: python -m migrations.002_migrate  (from backend/ 目录)
+
+注意：当前系统已完全使用 PostgreSQL，此脚本仅保留作为历史参考。
 """
 from __future__ import annotations
 

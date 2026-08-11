@@ -55,13 +55,20 @@ onMounted(async () => {
       </el-row>
 
       <!-- 样品组 -->
-      <el-card header="样品组" style="margin-bottom:16px">
+      <el-card style="margin-bottom:16px">
+        <template #header>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span>样品组</span>
+            <span style="font-size:13px;color:#64748B">样品总数：<strong style="color:#0F172A">{{ commission.total_sample_count || 0 }}</strong></span>
+          </div>
+        </template>
         <el-table :data="commission.sample_groups" empty-text="暂无样品组" size="small">
           <el-table-column prop="group_no" label="组号" width="180" />
           <el-table-column prop="sample_name" label="样品名称" />
           <el-table-column prop="model" label="型号" />
           <el-table-column prop="material_name" label="材料" />
           <el-table-column prop="quantity" label="数量" width="80" />
+          <el-table-column prop="experiment_codes" label="检测项目" width="150" />
           <el-table-column prop="status" label="状态" width="100">
             <template #default="{ row }">
               <el-tag size="small">{{ row.status }}</el-tag>

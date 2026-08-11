@@ -12,11 +12,11 @@ const attFilters = reactive({ commission_no: '', task_no: '', attachment_type: '
 const attachments = ref([])
 
 // 审计日志
-const auditFilters = reactive({ entity_type: '', entity_id: '', actor: '', action: '' })
+const auditFilters = reactive({ entity_type: '', entity_id: '', actor: '', action: '', commission_no: '' })
 const auditLogs = ref([])
 
 // 修改日志
-const modFilters = reactive({ entity_type: '', entity_id: '', actor: '' })
+const modFilters = reactive({ entity_type: '', entity_id: '', actor: '', commission_no: '' })
 const modifications = ref([])
 
 // 委托追溯聚合
@@ -57,6 +57,7 @@ async function loadAuditLogs() {
     if (auditFilters.entity_id) params.entity_id = auditFilters.entity_id
     if (auditFilters.actor) params.actor = auditFilters.actor
     if (auditFilters.action) params.action = auditFilters.action
+    if (auditFilters.commission_no) params.commission_no = auditFilters.commission_no
     const { data } = await request.get('/traceability/audit-logs', { params })
     auditLogs.value = data
   } catch {
@@ -73,6 +74,7 @@ async function loadModifications() {
     if (modFilters.entity_type) params.entity_type = modFilters.entity_type
     if (modFilters.entity_id) params.entity_id = modFilters.entity_id
     if (modFilters.actor) params.actor = modFilters.actor
+    if (modFilters.commission_no) params.commission_no = modFilters.commission_no
     const { data } = await request.get('/traceability/modifications', { params })
     modifications.value = data
   } catch {
@@ -165,6 +167,7 @@ onMounted(() => {
           </el-select>
           <el-input v-model="auditFilters.entity_id" placeholder="实体ID" clearable style="width:180px" @keyup.enter="loadAuditLogs" />
           <el-input v-model="auditFilters.actor" placeholder="操作人" clearable style="width:130px" @keyup.enter="loadAuditLogs" />
+          <el-input v-model="auditFilters.commission_no" placeholder="委托编号" clearable style="width:160px" @keyup.enter="loadAuditLogs" />
           <el-button type="primary" @click="loadAuditLogs">查询</el-button>
         </div>
 
@@ -181,6 +184,7 @@ onMounted(() => {
           </el-table-column>
           <el-table-column prop="entity_type" label="实体类型" width="90" />
           <el-table-column prop="entity_id" label="实体ID" width="180" />
+          <el-table-column prop="commission_no" label="委托编号" width="160" />
           <el-table-column prop="field_name" label="字段" width="120" />
           <el-table-column label="变更" min-width="200">
             <template #default="{ row }">
@@ -202,6 +206,7 @@ onMounted(() => {
           </el-select>
           <el-input v-model="modFilters.entity_id" placeholder="实体ID" clearable style="width:180px" @keyup.enter="loadModifications" />
           <el-input v-model="modFilters.actor" placeholder="修改人" clearable style="width:130px" @keyup.enter="loadModifications" />
+          <el-input v-model="modFilters.commission_no" placeholder="委托编号" clearable style="width:160px" @keyup.enter="loadModifications" />
           <el-button type="primary" @click="loadModifications">查询</el-button>
         </div>
 
@@ -212,6 +217,7 @@ onMounted(() => {
           <el-table-column prop="actor" label="修改人" width="100" />
           <el-table-column prop="entity_type" label="实体类型" width="90" />
           <el-table-column prop="entity_id" label="实体ID" width="180" />
+          <el-table-column prop="commission_no" label="委托编号" width="160" />
           <el-table-column prop="field_name" label="字段" width="130" />
           <el-table-column label="旧值 → 新值" min-width="220">
             <template #default="{ row }">

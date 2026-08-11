@@ -25,6 +25,7 @@ class OrgOut(BaseModel):
     contact: str | None
     phone: str | None
     credit_code: str | None
+    notes: str | None
     enabled: bool
 
 
@@ -59,7 +60,7 @@ async def list_organizations(
 
     result = await db.execute(
         text(f"SELECT id, org_code, org_name, short_name, is_client, is_manufacturer, "
-             f"is_contract_manufacturer, address, contact, phone, credit_code, enabled "
+             f"is_contract_manufacturer, address, contact, phone, credit_code, notes, enabled "
              f"FROM organizations {where} ORDER BY id LIMIT :limit"),
         {**params, "limit": limit},
     )
@@ -67,7 +68,7 @@ async def list_organizations(
         OrgOut(
             id=r[0], org_code=r[1], org_name=r[2], short_name=r[3],
             is_client=r[4], is_manufacturer=r[5], is_contract_manufacturer=r[6],
-            address=r[7], contact=r[8], phone=r[9], credit_code=r[10], enabled=r[11],
+            address=r[7], contact=r[8], phone=r[9], credit_code=r[10], notes=r[11], enabled=r[12],
         )
         for r in result.fetchall()
     ]
@@ -80,11 +81,45 @@ async def create_organization(
     _user: Annotated[dict, Depends(get_current_user)],
 ):
     """新建单位"""
+    # 检查是否存在同名或同编码的单位（含已停用的）
+    conflict = await db.execute(
+        text("SELECT id, org_name, org_code, enabled FROM organizations WHERE org_name=:on OR (org_code IS NOT NULL AND org_code=:oc)"),
+        {"on": body.org_name, "oc": body.org_code or ""},
+    )
+    conflict_row = conflict.fetchone()
+    if conflict_row:
+        if conflict_row[3]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                              detail=f"单位已存在：{conflict_row[1]}（编码：{conflict_row[2]}）")
+        else:
+            # 已停用 → 重新启用并更新
+            await db.execute(
+                text("""UPDATE organizations SET enabled=TRUE, updated_at=localtimestamp,
+                    org_code=COALESCE(:oc, org_code), short_name=COALESCE(:sn, short_name),
+                    is_client=:ic, is_manufacturer=:im, is_contract_manufacturer=:icm,
+                    address=COALESCE(:ad, address), contact=COALESCE(:co, contact),
+                    phone=COALESCE(:ph, phone), credit_code=COALESCE(:cc, credit_code),
+                    notes=COALESCE(:nt, notes)
+                    WHERE id=:i"""),
+                {"i": conflict_row[0], "oc": body.org_code, "sn": body.short_name,
+                 "ic": body.is_client, "im": body.is_manufacturer, "icm": body.is_contract_manufacturer,
+                 "ad": body.address, "co": body.contact, "ph": body.phone,
+                 "cc": body.credit_code, "nt": body.notes},
+            )
+            return OrgOut(
+                id=conflict_row[0], org_code=body.org_code or conflict_row[2],
+                org_name=body.org_name, short_name=body.short_name,
+                is_client=body.is_client, is_manufacturer=body.is_manufacturer,
+                is_contract_manufacturer=body.is_contract_manufacturer,
+                address=body.address, contact=body.contact, phone=body.phone,
+                credit_code=body.credit_code, notes=body.notes, enabled=True,
+            )
+
     result = await db.execute(
         text("""
             INSERT INTO organizations (org_code, org_name, short_name, is_client, is_manufacturer,
               is_contract_manufacturer, address, contact, phone, credit_code, notes, enabled, created_at, updated_at)
-            VALUES (:oc, :on, :sn, :ic, :im, :icm, :ad, :co, :ph, :cc, :nt, TRUE, now(), now())
+            VALUES (:oc, :on, :sn, :ic, :im, :icm, :ad, :co, :ph, :cc, :nt, TRUE, localtimestamp, localtimestamp)
             RETURNING id
         """),
         {
@@ -101,7 +136,7 @@ async def create_organization(
         is_manufacturer=body.is_manufacturer,
         is_contract_manufacturer=body.is_contract_manufacturer,
         address=body.address, contact=body.contact, phone=body.phone,
-        credit_code=body.credit_code, enabled=True,
+        credit_code=body.credit_code, notes=body.notes, enabled=True,
     )
 
 
@@ -146,7 +181,7 @@ async def update_organization(
     if updates:
         params["id"] = org_id
         await db.execute(
-            text(f"UPDATE organizations SET {', '.join(updates)}, updated_at=now() WHERE id=:id"),
+            text(f"UPDATE organizations SET {', '.join(updates)}, updated_at=localtimestamp WHERE id=:id"),
             params,
         )
 
@@ -161,7 +196,7 @@ async def delete_organization(
 ):
     """删除单位（软删除，管理员）"""
     result = await db.execute(
-        text("UPDATE organizations SET enabled=FALSE, updated_at=now() WHERE id=:i AND enabled=TRUE"),
+        text("UPDATE organizations SET enabled=FALSE, updated_at=localtimestamp WHERE id=:i AND enabled=TRUE"),
         {"i": org_id},
     )
     if result.rowcount == 0:

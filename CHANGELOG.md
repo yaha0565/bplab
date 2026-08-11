@@ -7,6 +7,98 @@
 
 ---
 
+## [V11.2] — 2026-08-11
+
+### 🔧 修复 — 关键问题
+
+- **原始记录 DOCX 模板引擎重写** (`record_template_engine.py`):
+  - `build_context_values` 从实际 payload 结构读取数据 (`_template_fields`、`_form`、`_rows`、`_equipment_checks`)
+  - 支持测量数据行按列标题映射（试样编号、粗糙度、孔隙率、结论等）
+  - 修复 checkbox 选择逻辑：不再将"不符合"误选为"符合"（否定词检测）
+  - 新增 `_fill_measurement_rows_v2` 替代旧版测量行填充
+  - 记录下载现包含：任务编号、样品编号、设备管理编号、操作员/复核员、日期
+- **检验报告导出修复** (`export.py`):
+  - 修复 SQL 错误：`client_org` 不存在 → JOIN `organizations` 表获取 `org_name`
+  - 修复数据来源：样品信息从 `sample_groups` 表查询（`commissions` 表无 `sample_name` 等列）
+  - 重写填充逻辑：按中文标签匹配段落（"报告编号："、"委 托 单 位："等）
+  - 填写设备表、环境表（温湿度）、检测项目表
+- **报告发放登记下载修复**: `Content-Disposition` 中文文件名导致 UnicodeEncodeError → 全部改为 ASCII
+- **DOCX 下载返回 JSON 修复**: 模板文件未找到时改为通用 DOCX 生成（不再降级为 JSON）
+
+### ✨ 新增 — 审计追踪
+
+- **全系统审计日志接入** — 所有写操作按委托号 (`commission_no`) 记录：
+  | 模块 | 记录的操作 |
+  |------|-----------|
+  | `commissions.py` | 创建委托、创建样品组 |
+  | `tasks.py` | 创建任务包、接收任务包、标记实验时间 |
+  | `records.py` | 保存草稿/提交复核、复核通过、复核退回 |
+  | `reports.py` | 生成报告、质量审核、批准签发、发放、撤回、作废、更正（9项） |
+  | `signatures.py` | 上传签名、删除签名 |
+  | `users.py` | 创建用户、重置密码、修改角色、删除用户 |
+  | `hazardous_waste.py` | 登记危废 |
+- **哈希链审计日志** (`audit_service.py`): 统一服务，SHA-256 哈希链，同步写入 `audit_logs` + `modification_logs` + `report_actions`
+- **审计追踪 API** (`traceability.py`): 支持按委托号查询、按实体过滤、修改记录管理
+
+### 🏗 前端增强
+
+- **单据中心** (`DocumentCenter.vue`): 完整重写，支持 7 种单据类型查询、iframe srcdoc 预览、Blob 下载
+- **一键下载** (`BatchDownload.vue`): 完整重写，显示 4 类通用表单 + 原始记录 + 检验报告 + 报告发放登记，勾选批量下载
+- **审计追踪** (`AuditTrail.vue`): 按委托号输入，时间线展示所有操作，颜色区分操作类型
+- **报告发放管理** (`ReportDelivery.vue`): 已发布报告只保留撤回按钮，撤回增加原因对话框
+- 所有前端文件编译为纯 JavaScript（移除 TypeScript 类型注解）
+
+### 🔒 权限改进
+
+- 单据下载/预览权限扩展：`复核员` 和 `实验员` 加入允许角色（原仅 `质量负责人、管理员、样品管理员`）
+- 报告撤回权限扩展：新增 `质量负责人` 角色（原仅 `管理员`）
+
+### 🗺 模板配置
+
+- 33 个 DOCX 受控模板：R001-R017 原始记录表 + SOP-001~017 标准操作规程 + 6 个 FORM 表单
+- 模板引擎支持全角/半角空白标记、中文日期格式、checkbox 选择框、测量数据表
+
+---
+
+## [V11.1] — 2026-08-11
+
+### 🔧 修复 — 关键问题
+
+- **记录复核 500 错误修复** (`records.py`):
+  - 修复 `reports` 表 INSERT 中引用不存在的 `experiment` 列
+  - 修复 `records` 表 INSERT 中引用不存在的 `report_summary`、`report_conclusion`、`tester_self_check` 列，改为合并到 `payload` JSONB 字段
+  - 修复 `source_versions` 类型不匹配（`CAST AS jsonb` → TEXT）
+  - 清理死代码和不存在列的 SELECT 语句
+- **I011/I012 设备绑定修复**: 修正实验名称（去除"综合"），使 `experiment_methods` 与 `experiment_equipment_bindings` 名称匹配
+- **I011/I012 拍照节点 Key 修正**: `_EXPERIMENT_PHOTO_CHECKPOINTS` 中 key 名称同步更新
+
+### ✨ 新增 — 功能完善
+
+- **拍照时间戳**: `CameraCapture.vue` 拍照时在右下角叠加半透明时间戳水印（Canvas 2D 渲染）
+- **数据隔离**: 实验执行页按 task 做数据隔离，切换任务时完全重置表单状态
+- **提交强制校验**: 必填项未填或必拍照点未拍照时禁止提交，弹窗提示缺失项列表
+- **日期/时间字段**: 日期字段自动填入当日，时间字段改为按钮调用系统时间
+
+### 🗺 模板配置补全
+
+- `_KIND_TO_TEMPLATE_CODE` 新增 `density: R016`、`tarnish: R017`
+- `KIND_TO_TEMPLATE`、`RECORD_TEMPLATE_CODES` 新增 R016/R017
+- `_KIND_MAP` (record_word_engine.py) 新增 density/tarnish
+- `seed_v10.py` 新增 I010 到配置版本创建循环，修正 I011/I012 名称
+
+### 🧹 项目清理
+
+- 删除冗余模板文件（RECORD_R*、SOP_R* 英文命名重复项，保留中文命名模板）
+- 删除 `资料/` 参考数据文件夹
+- 移动 `experiment_schemas.py` 到 `backend/app/core/`
+- 更新 `.gitignore`
+
+### 📊 验证
+
+- 全部 14 个实验配置 API 通过：字段、列、拍照节点、设备绑定、模板文件均正常
+
+---
+
 ## [V11.0] — 2026-08-09
 
 ### 🏗 重大变更 — 前端架构升级

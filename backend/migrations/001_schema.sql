@@ -1,5 +1,4 @@
 -- BPLab Trace LIMS V11 — PostgreSQL Schema
--- 从 SQLite lims_db.py 的 init_db() 迁移而来
 
 -- ============================================================
 -- 用户与鉴权

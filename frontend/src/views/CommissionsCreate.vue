@@ -17,7 +17,7 @@ const form = reactive({
   production_org_id: null,
   production_relation: '客户提供',
   commission_date: new Date().toISOString().slice(0, 10),
-  due_date: '',
+  due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
   notes: '',
 })
 
@@ -28,7 +28,6 @@ const sampleGroups = ref([{
   sample_count: 1,
   experiment_codes: [],
   batch_no: '',
-  heat_no: '',
 }])
 
 const relations = ['客户提供', '自产', '外协', '合同制造']
@@ -51,7 +50,6 @@ function addSampleGroup() {
     sample_count: 1,
     experiment_codes: [],
     batch_no: '',
-    heat_no: '',
   })
 }
 
@@ -91,10 +89,10 @@ async function handleSubmit() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
 
-  // 验证至少一个样品组填写了材料
-  const validGroups = sampleGroups.value.filter(g => g.material_name.trim())
+  // 验证至少一个样品组填写了材料和批号
+  const validGroups = sampleGroups.value.filter(g => g.material_name.trim() && g.batch_no.trim())
   if (!validGroups.length) {
-    ElMessage.warning('请至少填写一个样品组的材料名称')
+    ElMessage.warning('请至少填写一个样品组的材料名称和批号')
     return
   }
 
@@ -119,7 +117,6 @@ async function handleSubmit() {
           experiment_codes: g.experiment_codes,
           experiments: expNames,
           batch_no: g.batch_no || null,
-          heat_no: g.heat_no || null,
         })
         groupCount++
       } catch (e) {
@@ -215,7 +212,7 @@ async function handleSubmit() {
           </div>
 
           <el-row :gutter="16">
-            <el-col :span="14">
+            <el-col :span="10">
               <el-form-item label="材料名称">
                 <el-select
                   v-model="sg.catalog_id"
@@ -235,14 +232,14 @@ async function handleSubmit() {
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="4">
+            <el-col :span="7">
               <el-form-item label="数量">
-                <el-input-number v-model="sg.sample_count" :min="1" :max="200" style="width:100%" />
+                <el-input-number v-model="sg.sample_count" :min="1" :max="200" controls-position="right" style="width:100%" />
               </el-form-item>
             </el-col>
-            <el-col :span="6">
-              <el-form-item label="批号">
-                <el-input v-model="sg.batch_no" placeholder="选填" />
+            <el-col :span="7">
+              <el-form-item label="批号" required>
+                <el-input v-model="sg.batch_no" placeholder="请输入批号" />
               </el-form-item>
             </el-col>
           </el-row>
@@ -262,10 +259,6 @@ async function handleSubmit() {
                 :value="m.experiment_code"
               />
             </el-select>
-          </el-form-item>
-
-          <el-form-item label="炉号">
-            <el-input v-model="sg.heat_no" placeholder="选填" style="max-width:300px" />
           </el-form-item>
         </div>
 

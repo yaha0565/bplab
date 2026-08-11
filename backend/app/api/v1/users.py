@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.audit_service import log_operation
+
 from app.core.deps import get_current_user, get_db, require_role
 from app.core.security import hash_password
 
@@ -25,7 +27,7 @@ class UserOut(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=2, max_length=64)
     display_name: str = Field(..., min_length=1, max_length=64)
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=6)
     role: str = Field(..., pattern=r"^(管理员|样品管理员|实验员|复核员|质量负责人)$")
 
 
@@ -61,9 +63,11 @@ async def create_user(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在")
 
     await db.execute(
-        text("INSERT INTO users (username, display_name, password_hash, role, enabled, created_at) VALUES (:u, :d, :p, :r, TRUE, now())"),
+        text("INSERT INTO users (username, display_name, password_hash, role, enabled, created_at) VALUES (:u, :d, :p, :r, TRUE, localtimestamp)"),
         {"u": body.username, "d": body.display_name, "p": hash_password(body.password), "r": body.role},
     )
+    await log_operation(db, "user", body.username, _user, "创建用户",
+                         comment=f"角色:{body.role} 姓名:{body.display_name}")
     return UserOut(username=body.username, display_name=body.display_name, role=body.role, enabled=True)
 
 
@@ -81,6 +85,7 @@ async def reset_password(
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    await log_operation(db, "user", username, current_user, "重置密码")
     return {"message": "密码已重置"}
 
 
@@ -105,6 +110,8 @@ async def update_user_role(
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    await log_operation(db, "user", username, current_user, "修改角色",
+                         comment=f"新角色:{body.role}")
     return {"message": "角色已更新"}
 
 
@@ -135,4 +142,5 @@ async def delete_user(
 
     # 删除用户
     await db.execute(text("DELETE FROM users WHERE username=:u"), {"u": username})
+    await log_operation(db, "user", username, current_user, "删除用户")
     return {"message": f"用户 {username} 已删除"}
